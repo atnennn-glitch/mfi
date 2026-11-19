@@ -77,6 +77,15 @@ c.innerHTML=`<div class="stats"><div class="card"><div class="label">Загал�
 }bindRows()}
 const dlg=$('#entryDialog'),form=$('#entryForm'),type=$('#type');
 const entryCategory = $('#category'), entryOperation = $('#cryptoOperation');
+const parseEntryNumber = field => Number($(field).value.trim().replace(/\s/g, '').replace(',', '.'));
+
+function updateInvestmentPrice() {
+  const amount = parseEntryNumber('#amount');
+  const quantity = parseEntryNumber('#investmentQuantity');
+  const price = amount / quantity;
+  $('#investmentPrice').value = Number.isFinite(price) && price > 0 ? formatTokenPrice(price) : '';
+}
+
 function syncForm(selectedCategory) {
   const section = type.value;
   const isCrypto = section === 'crypto';
@@ -88,7 +97,8 @@ function syncForm(selectedCategory) {
   entryCategory.required = isCrypto;
   entryCategory.replaceChildren();
   if (categories) {
-    const choices = isCrypto ? [...categories, ...(selectedCategory && !categories.includes(selectedCategory) ? [selectedCategory] : [])] : categories;
+    const choices = isCrypto ? [...categories, HISTORICAL_CRYPTO_PURCHASE] : categories;
+    if (isCrypto && selectedCategory && !choices.includes(selectedCategory)) choices.push(selectedCategory);
     if (isCrypto) entryCategory.add(new Option('Виберіть портфель', ''));
     for (const label of choices) entryCategory.add(new Option(label, label));
     if (choices.includes(selectedCategory)) entryCategory.value = selectedCategory;
@@ -109,7 +119,14 @@ function syncCryptoFields() {
   $('#amountCaption').textContent = buy ? 'Сума покупки, USDT'
     : isCrypto ? 'Сума, USDT' : type.value === 'work' ? 'Сума інвестиції, ₴' : 'Сума, ₴';
   $('#cryptoInvestmentFields').hidden = !buy;
-  for (const field of ['#investmentCoin', '#investmentPrice', '#investmentQuantity']) $(field).required = buy;
+  const historicalOption = [...entryCategory.options].find(option => option.value === HISTORICAL_CRYPTO_PURCHASE);
+  if (historicalOption) {
+    if (!buy && historicalOption.selected) entryCategory.value = '';
+    historicalOption.hidden = !buy;
+    historicalOption.disabled = !buy;
+  }
+  for (const field of ['#investmentCoin', '#investmentQuantity']) $(field).required = buy;
+  if (buy) updateInvestmentPrice();
 }
 
 function openEntry(record = null, operation = 'deposit', defaultCoin = '') {
@@ -128,8 +145,8 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '') {
   $('#date').value = record?.date || new Date().toLocaleDateString('sv-SE');
   $('#paymentSource').value = record?.paymentSource || '';
   $('#investmentCoin').value = record?.investmentCoin || defaultCoin;
-  $('#investmentPrice').value = record?.investmentPrice || '';
   $('#investmentQuantity').value = record?.investmentQuantity || '';
+  updateInvestmentPrice();
   $('#name').value = record?.name || '';
   $('#counterparty').value = record?.counterparty || '';
   $('#purpose').value = record?.purpose || '';
@@ -139,6 +156,8 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '') {
 }
 type.onchange = () => syncForm();
 entryOperation.onchange = syncCryptoFields;
+$('#amount').addEventListener('input', updateInvestmentPrice);
+$('#investmentQuantity').addEventListener('input', updateInvestmentPrice);
 $('#addBtn').onclick = () => openEntry();
 
 form.onsubmit = event => {
@@ -149,21 +168,20 @@ form.onsubmit = event => {
     field.reportValidity();
     field.setCustomValidity('');
   };
-  const parse = field => Number($(field).value.trim().replace(/\s/g, '').replace(',', '.'));
-  const amount = parse('#amount');
+  const amount = parseEntryNumber('#amount');
   const isCrypto = type.value === 'crypto';
   const operation = entryOperation.value;
   const buy = isCrypto && operation === 'investment';
   const coin = cryptoTicker($('#investmentCoin').value);
-  const price = parse('#investmentPrice');
-  const quantity = parse('#investmentQuantity');
+  const quantity = parseEntryNumber('#investmentQuantity');
+  const price = amount / quantity;
   if (!Number.isFinite(amount) || amount < 0 || (isCrypto && amount === 0)) {
     return invalid($('#amount'), isCrypto ? 'Введіть суму більше нуля' : 'Введіть коректну суму');
   }
   if (buy) {
     if (!/^[A-Z0-9]{1,20}$/.test(coin)) return invalid($('#investmentCoin'), 'Введіть тикер монети, наприклад SOL');
-    if (!Number.isFinite(price) || price <= 0) return invalid($('#investmentPrice'), 'Введіть курс більше нуля');
     if (!Number.isFinite(quantity) || quantity <= 0) return invalid($('#investmentQuantity'), 'Введіть кількість більше нуля');
+    if (!Number.isFinite(price) || price <= 0) return invalid($('#investmentQuantity'), 'Не вдалося розрахувати ціну за монету');
   }
 
   const id = $('#editId').value;

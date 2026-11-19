@@ -3,22 +3,26 @@ const CRYPTO_OPERATIONS = {
   withdrawal: 'Списання балансу',
   investment: 'Інвестиція',
 };
+const HISTORICAL_CRYPTO_PURCHASE = 'Старий запис';
 const marketQuotes = new Map();
 const marketRequests = new Map();
 const tokenNumber = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 12 });
 const regularPrice = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 4 });
-const tokenPrice = value => `${(Math.abs(value) >= 0.01 ? regularPrice : tokenNumber).format(value)} USDT`;
+const formatTokenPrice = value => (Math.abs(value) >= 0.01 ? regularPrice : tokenNumber).format(value);
+const tokenPrice = value => `${formatTokenPrice(value)} USDT`;
+const pnlPercent = new Intl.NumberFormat('uk-UA', { style: 'percent', signDisplay: 'exceptZero', maximumFractionDigits: 2 });
 const isLegacyCryptoBuy = record => record.type === 'work' && record.category === 'У крипто';
 const isCryptoBuy = record => isLegacyCryptoBuy(record) ||
   (record.type === 'crypto' && record.cryptoOperation === 'investment');
 const cryptoWallet = record => isLegacyCryptoBuy(record) ? record.investmentPortfolio : record.category;
 const cryptoTicker = value => String(value ?? '').trim().toUpperCase();
 const cryptoDate = record => new Date(record.date + 'T12:00').toLocaleDateString('uk-UA');
+const isHistoricalCryptoBuy = record => isCryptoBuy(record) && cryptoWallet(record) === HISTORICAL_CRYPTO_PURCHASE;
 
 function walletCash(entries = records) {
   const balances = new Map(CATEGORIES.crypto.map(wallet => [wallet, 0]));
   for (const record of entries) {
-    if (record.type !== 'crypto') continue;
+    if (record.type !== 'crypto' || isHistoricalCryptoBuy(record)) continue;
     const wallet = cryptoWallet(record) || 'Портфель не вказано';
     const amount = Number(record.amount);
     if (!Number.isFinite(amount)) continue;
@@ -109,7 +113,20 @@ function quoteMetrics(index) {
     <div><span>Нереалізований результат</span><b data-pnl="${index}">—</b></div>`;
 }
 
+function writeUnrealizedPnl(element, value, cost) {
+  const pnl = value - cost;
+  const percent = cost > 0 ? ` (${pnlPercent.format(pnl / cost)})` : '';
+  element.textContent = `${pnl > 0 ? '+' : ''}${fmtUSDT(pnl)}${percent}`;
+  element.dataset.pnlTone = pnl > 0 ? 'gain' : pnl < 0 ? 'loss' : 'flat';
+}
+
 async function loadMarketPrices(scope, positions, onQuote) {
+  const purchaseRows = new Map();
+  for (const result of scope.querySelectorAll('[data-purchase-coin]')) {
+    const coin = result.dataset.purchaseCoin;
+    if (!purchaseRows.has(coin)) purchaseRows.set(coin, []);
+    purchaseRows.get(coin).push(result);
+  }
   await Promise.all(positions.map(async (position, index) => {
     const price = await marketPrice(position.coin);
     if (!scope.isConnected) return;
@@ -118,14 +135,14 @@ async function loadMarketPrices(scope, positions, onQuote) {
       quote.textContent = price === undefined ? 'Недоступний' : tokenPrice(price);
       if (price !== undefined) {
         const value = price * position.quantity;
-        const pnl = value - position.amount;
-        const percent = position.amount > 0
-          ? ` (${new Intl.NumberFormat('uk-UA', { style: 'percent', signDisplay: 'exceptZero', maximumFractionDigits: 2 }).format(pnl / position.amount)})`
-          : '';
         scope.querySelector(`[data-market-value="${index}"]`).textContent = fmtUSDT(value);
-        const result = scope.querySelector(`[data-pnl="${index}"]`);
-        result.textContent = `${pnl > 0 ? '+' : ''}${fmtUSDT(pnl)}${percent}`;
-        result.style.color = pnl >= 0 ? 'var(--lime)' : '#ff8b32';
+        writeUnrealizedPnl(scope.querySelector(`[data-pnl="${index}"]`), value, position.amount);
+      }
+    }
+    for (const result of purchaseRows.get(position.coin) || []) {
+      const quantity = Number(result.dataset.quantity), cost = Number(result.dataset.cost);
+      if (price !== undefined && Number.isFinite(quantity) && quantity > 0 && Number.isFinite(cost) && cost >= 0) {
+        writeUnrealizedPnl(result, price * quantity, cost);
       }
     }
     onQuote?.();
@@ -141,7 +158,7 @@ function cryptoMovementRow(record) {
     <div class="amount">${withdrawal ? '−' : '+'}${fmtUSDT(record.amount)}</div>${recordActions(record)}</div>`;
 }
 
-function investmentRow(record) {
+function investmentRow(record, showPurchasePnl = false) {
   const purchase = isCryptoBuy(record);
   const coin = cryptoTicker(record.investmentCoin) || 'Крипто';
   const title = purchase ? coin : (record.name || 'Інвестиція у блог');
@@ -149,9 +166,15 @@ function investmentRow(record) {
     ? [cryptoWallet(record), record.investmentPrice && `курс ${tokenPrice(record.investmentPrice)}`,
        record.investmentQuantity && `${tokenNumber.format(record.investmentQuantity)} ${coin}`, record.note]
     : [record.paymentSource && `оплачено з: ${record.paymentSource}`, record.note];
-  return `<div class="row investment-row"><div class="row-icon">${purchase ? '₿' : '◉'}</div>
+  const isSol = purchase && coin === 'SOL';
+  const icon = isSol ? '<img class="solana-mark" src="solana-mark.svg" alt="" width="20" height="16">'
+    : purchase ? '₿' : '◉';
+  const pnl = purchase && showPurchasePnl
+    ? `<small class="purchase-pnl">Нереалізовано <span data-purchase-coin="${esc(coin)}" data-quantity="${esc(record.investmentQuantity)}" data-cost="${esc(record.amount)}">—</span></small>`
+    : '';
+  return `<div class="row investment-row${isSol ? ' sol-purchase' : ''}"><div class="row-icon">${icon}</div>
     <div><b>${esc(title)}</b><small>${esc([cryptoDate(record), ...details.filter(Boolean)].join(' · '))}</small></div>
-    <div class="amount">${purchase ? fmtUSDT(record.amount) : fmt(record.amount)}</div>${recordActions(record)}</div>`;
+    <div class="amount">${purchase ? fmtUSDT(record.amount) : fmt(record.amount)}${pnl}</div>${recordActions(record)}</div>`;
 }
 
 function recordActions(record) {
@@ -178,6 +201,7 @@ function renderCrypto(content, visibleRecords) {
     .sort((a, b) => b.date.localeCompare(a.date));
   const walletPositions = new Map();
   for (const purchase of purchases) {
+    if (isHistoricalCryptoBuy(purchase)) continue;
     const wallet = cryptoWallet(purchase) || 'Портфель не вказано';
     if (!wallets.has(wallet)) wallets.set(wallet, 0);
     if (!walletPositions.has(wallet)) walletPositions.set(wallet, []);
@@ -192,8 +216,9 @@ function renderCrypto(content, visibleRecords) {
       <div class="section-title"><h2>Баланси портфелів</h2></div>
       <div class="crypto-wallets">${[...wallets].map(([wallet, cash]) => {
         const assets = investmentPositions(walletPositions.get(wallet) || []);
+        const cashLabel = wallet === 'Hyperliquid' ? 'USDC BOTTY' : wallet === 'Phantom Wallet' ? 'SOL' : 'Вільні кошти';
         return `<div class="crypto-wallet"><h3>${esc(wallet)}</h3>
-          <div><span>Вільні кошти</span><b>${fmtUSDT(cash)}</b></div>
+          <div><span>${cashLabel}</span><b>${fmtUSDT(cash)}</b></div>
           ${assets.length ? `<small>${assets.map(asset => `${tokenNumber.format(asset.quantity)} ${esc(asset.coin)}`).join(' · ')}</small>` : ''}
           </div>`;
       }).join('')}</div>
@@ -206,7 +231,7 @@ function renderCrypto(content, visibleRecords) {
       <div class="section-title"><h2>SOL</h2><button id="addSolPurchase" class="ghost">Додати покупку SOL</button></div>
       ${positionMetrics(sol, positions.indexOf(sol))}
       <h3 class="sol-history-title">Покупки SOL</h3>
-      ${solPurchases.length ? solPurchases.map(investmentRow).join('') : '<div class="empty">Покупок SOL ще немає</div>'}
+      ${solPurchases.length ? solPurchases.map(record => investmentRow(record, true)).join('') : '<div class="empty">Покупок SOL ще немає</div>'}
     </div>
     <button class="ghost" id="allCryptoInvestments">Усі криптоінвестиції</button>`;
   $('#allCryptoInvestments').onclick = () => render('work');
@@ -227,7 +252,7 @@ function renderInvestments(content, visibleRecords) {
   const purchases = visibleRecords.filter(isCryptoBuy).sort((a, b) => b.date.localeCompare(a.date));
   const blog = visibleRecords.filter(record => record.type === 'work' && !isCryptoBuy(record))
     .sort((a, b) => b.date.localeCompare(a.date));
-  content.innerHTML = `<div class="stats investment-summary">
+  content.innerHTML = `<div id="investmentView"><div class="stats investment-summary">
     <div class="card"><div class="label">У блог</div><div class="value accent">${fmt(blogTotal)}</div></div>
     <div class="card"><div class="label">Вкладено в крипто</div><div class="value">${fmtUSDT(positions.reduce((total, p) => total + p.amount, 0))}</div></div>
     <div class="card"><div class="label">Криптопозицій</div><div class="value">${positions.length}</div></div>
@@ -237,9 +262,9 @@ function renderInvestments(content, visibleRecords) {
       <div class="position-head"><div><div class="coin-symbol">${esc(p.coin)}</div><small class="position-wallets">${esc([...p.wallets].join(' · '))}</small></div></div>
       ${positionMetrics(p, index)}</div>`).join('')}</div>
     <div class="card breakdown"><div class="section-title"><h2>Історія криптопокупок</h2></div>
-      ${purchases.length ? purchases.map(investmentRow).join('') : '<div class="empty">За цей період покупок немає</div>'}</div>
+      ${purchases.length ? purchases.map(record => investmentRow(record, true)).join('') : '<div class="empty">За цей період покупок немає</div>'}</div>
     <div class="card breakdown"><div class="section-title"><h2>Вкладення у блог</h2></div>
-      ${blog.length ? blog.map(investmentRow).join('') : '<div class="empty">За цей період записів немає</div>'}</div>`;
+      ${blog.length ? blog.map(record => investmentRow(record)).join('') : '<div class="empty">За цей період записів немає</div>'}</div></div>`;
   $('#addCryptoInvestment').onclick = () => openEntry(null, 'investment');
-  loadMarketPrices($('#positionGrid'), positions);
+  loadMarketPrices($('#investmentView'), positions);
 }
