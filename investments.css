@@ -1,1 +1,25 @@
 #cryptoInvestmentFields{display:grid;gap:14px}#cryptoInvestmentFields[hidden]{display:none}.investment-summary{grid-template-columns:repeat(3,1fr)}.position-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:14px}.position-card{position:relative;overflow:hidden}.position-card:before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--lime)}.position-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:20px}.coin-symbol{font-size:28px;font-weight:900;color:var(--lime)}.position-wallets{color:var(--muted);font-size:13px;text-align:right}.position-metrics{display:grid;grid-template-columns:1fr 1fr;gap:14px}.position-metrics div{display:grid;gap:5px}.position-metrics span{color:var(--muted);font-size:13px}.position-metrics b{font-size:18px}.investment-row .row-icon{color:var(--lime)}.investment-kind{display:inline-flex;padding:4px 9px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px;margin-left:8px}@media(max-width:1100px){.position-grid{grid-template-columns:1fr 1fr}}@media(max-width:700px){.investment-summary,.position-grid{grid-template-columns:1fr}.position-metrics{grid-template-columns:1fr}}
+#solPosition .position-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+}
+.crypto-note { display: block; margin-top: 6px; color: var(--muted); }
+.crypto-note:empty { display: none; }
+.crypto-wallets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.crypto-wallet { padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.crypto-wallet h3 { margin: 0 0 12px; font-size: 1rem; }
+.crypto-wallet div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 12px; }
+.crypto-wallet span, .crypto-wallet small { color: var(--muted); }
+.crypto-wallet small { display: block; margin-top: 8px; }
+.sol-history-title { margin: 24px 0 4px; font-size: 1rem; }
+#allCryptoInvestments { margin-top: 14px; }
+.investment-row > div { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 550px) {
+  .investment-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+  .investment-row .row-icon { display: none; }
+  .investment-row .amount { grid-column: 1; justify-self: start; }
+  .investment-row .row-actions { grid-column: 2; grid-row: 1 / 3; }
+}

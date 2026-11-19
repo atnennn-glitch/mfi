@@ -10,8 +10,34 @@ let migrated=false;records=records.map(r=>{if(r.type==='capital'&&r.category==='
 const USD_RATE=45,$=s=>document.querySelector(s),$$=s=>document.querySelectorAll(s),fmt=n=>new Intl.NumberFormat('uk-UA',{style:'currency',currency:'UAH',maximumFractionDigits:2}).format(n||0),fmtUSD=n=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format((n||0)/USD_RATE),fmtUSDT=n=>`${new Intl.NumberFormat('uk-UA',{maximumFractionDigits:2}).format(n||0)} USDT`,money=(type,n)=>type==='crypto'?fmtUSDT(n):fmt(n),esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const save=()=>localStorage.setItem('finspace-records',JSON.stringify(records)),visible=()=>records.filter(r=>!period||r.date.startsWith(period)),sum=t=>visible().filter(r=>r.type===t).reduce((a,r)=>a+Number(r.amount),0);
 Object.entries(TYPES).forEach(([k,v])=>{const b=document.createElement('button');b.innerHTML=`${v[2]} &nbsp; ${v[0]}`;b.onclick=()=>render(k);b.dataset.key=k;$('#nav').appendChild(b)});
-function row(r){const cryptoInvestment=r.type==='work'&&r.category==='У крипто',label=cryptoInvestment?(r.investmentCoin||'Крипто').toUpperCase():r.type==='income'?(r.counterparty||r.category||'Надходження'):((CATEGORIES[r.type]?r.category:null)||r.name||TYPES[r.type][0]),details=cryptoInvestment?[r.investmentPortfolio,r.investmentPrice&&`курс ${fmtUSDT(r.investmentPrice)}`].filter(Boolean).join(' · '):r.type==='income'?[r.category,r.purpose,r.name&&`джерело: ${r.name}`].filter(Boolean).join(' · '):[r.paymentSource&&`оплачено з: ${r.paymentSource}`,r.note].filter(Boolean).join(' · ');return `<div class="row"><div class="row-icon">${cryptoInvestment?'₿':ICONS[r.category]||ICONS[label]||TYPES[r.type][2]}</div><div><b>${esc(label)}</b><small>${new Date(r.date+'T12:00').toLocaleDateString('uk-UA')}${details?' · '+esc(details):''}</small></div><div class="amount">${cryptoInvestment?fmtUSDT(r.amount):money(r.type,r.amount)}</div><div class="row-actions"><button class="edit" data-id="${r.id}" title="Редагувати">✎</button><button class="delete" data-id="${r.id}" title="Видалити">×</button></div></div>`}
-function bindRows(){$$('.edit').forEach(b=>b.onclick=()=>openEntry(records.find(r=>r.id===b.dataset.id)));$$('.delete').forEach(b=>b.onclick=async()=>{const d=$('#confirmDialog');d.showModal();if(await new Promise(ok=>d.addEventListener('close',()=>ok(d.returnValue==='confirm'),{once:true}))){records=records.filter(r=>r.id!==b.dataset.id);save();render(current)}})}
+function row(r) {
+  if (isCryptoBuy(r) || r.type === 'work') return investmentRow(r);
+  if (r.type === 'crypto') return cryptoMovementRow(r);
+  const label = r.type === 'income' ? (r.counterparty || r.category || 'Надходження')
+    : ((CATEGORIES[r.type] ? r.category : null) || r.name || TYPES[r.type][0]);
+  const details = r.type === 'income' ? [r.category, r.purpose, r.name && `джерело: ${r.name}`]
+    : [r.paymentSource && `оплачено з: ${r.paymentSource}`, r.note];
+  return `<div class="row"><div class="row-icon">${ICONS[r.category] || ICONS[label] || TYPES[r.type][2]}</div>
+    <div><b>${esc(label)}</b><small>${esc([cryptoDate(r), ...details.filter(Boolean)].join(' · '))}</small></div>
+    <div class="amount">${money(r.type,r.amount)}</div>${recordActions(r)}</div>`;
+}
+function bindRows() {
+  $$('.edit').forEach(button => button.onclick = () => openEntry(records.find(record => record.id === button.dataset.id)));
+  $$('.delete').forEach(button => button.onclick = async () => {
+    const dialog = $('#confirmDialog');
+    dialog.returnValue = '';
+    dialog.showModal();
+    const confirmed = await new Promise(resolve => dialog.addEventListener('close',
+      () => resolve(dialog.returnValue === 'confirm'), { once: true }));
+    if (!confirmed) return;
+    const updated = records.filter(record => record.id !== button.dataset.id);
+    const error = cryptoBalanceError(updated);
+    if (error) return alert(error);
+    records = updated;
+    save();
+    render(current);
+  });
+}
 function groups(type,names){return names.map(n=>[n,visible().filter(r=>r.type===type&&r.category===n).reduce((a,r)=>a+Number(r.amount),0)])}
 function capitalGroups(){return CATEGORIES.capital.map(n=>[n,records.filter(r=>r.type==='capital'&&r.category===n).reduce((a,r)=>a+Number(r.amount),0)-records.filter(r=>r.type==='expense'&&r.paymentSource===n).reduce((a,r)=>a+Number(r.amount),0)])}
 function currentCapital(){return capitalGroups().reduce((a,x)=>a+x[1],0)}
@@ -25,25 +51,151 @@ function renderTasks(c){$('.toolbar').style.display='none';$('#addBtn').style.di
 function savePlans(){localStorage.setItem('finspace-income-plans',JSON.stringify(plans));localStorage.setItem('finspace-income-ideas',JSON.stringify(ideas))}
 function expectedTotal(month=localStorage.getItem('finspace-plan-month')||'2026-12'){return plans.filter(p=>!p.received&&p.month===month).reduce((a,p)=>a+Number(p.amount),0)}
 function renderDecomposition(c){$('.toolbar').style.display='none';$('#addBtn').style.display='none';const defaultMonth='2026-12',selected=localStorage.getItem('finspace-plan-month')||defaultMonth,monthPlans=plans.filter(p=>p.month===selected),expected=monthPlans.filter(p=>!p.received).reduce((a,p)=>a+Number(p.amount),0),received=monthPlans.filter(p=>p.received).reduce((a,p)=>a+Number(p.amount),0);c.innerHTML=`<div class="decomp-summary"><div class="card expected-point"><div class="label">Очікується</div><div class="value">${fmt(expected)}</div></div><div class="card"><div class="label">Вже надійшло</div><div class="value accent">${fmt(received)}</div></div><div class="card"><div class="label">Прогноз разом</div><div class="value">${fmt(expected+received)}</div></div></div><div class="card decomp-form"><label>Місяць<input id="planMonth" type="month" value="${selected}"></label><label>Від кого<input id="planClient" placeholder="Клієнт або компанія"></label><label>Платіж / за що<input id="planPurpose" placeholder="Наприклад: реклама"></label><label>Сума, ₴<input id="planAmount" inputmode="decimal" placeholder="0"></label><button id="planAdd" class="primary">Додати платіж</button></div><div class="decomp-grid"><div class="card"><div class="section-title"><h2>Прогнозовані платежі</h2><span>${monthPlans.length}</span></div><div id="planRows">${monthPlans.length?monthPlans.map(p=>`<div class="plan-row ${p.received?'received':''}"><button class="plan-status" data-plan-toggle="${p.id}" title="Позначити отриманим">${p.received?'✓':''}</button><div class="plan-copy"><b>${esc(p.client||'Без імені')}</b><small>${esc(p.purpose||'Очікуваний платіж')}</small></div><div class="plan-amount"><b>${fmt(p.amount)}</b><small>${p.received?'отримано':'очікується'}</small></div><button class="plan-delete" data-plan-delete="${p.id}" title="Видалити">×</button></div>`).join(''):'<div class="task-empty">На цей місяць платежів ще немає</div>'}</div></div><div class="card"><div class="section-title"><h2>Ідеї, де ще взяти дохід</h2><span>${ideas.length}</span></div><div class="idea-add"><input id="ideaTitle" placeholder="Нова ідея"><button id="ideaAdd" class="primary">＋</button></div>${ideas.length?ideas.map(i=>`<div class="idea-row"><span class="idea-dot">◆</span><span>${esc(i.title)}</span><button class="idea-delete" data-idea-delete="${i.id}">×</button></div>`).join(''):'<div class="task-empty">Додайте першу ідею</div>'}</div></div>`;$('#planMonth').onchange=e=>{localStorage.setItem('finspace-plan-month',e.target.value);render('decomposition')};const addPlan=()=>{const raw=$('#planAmount').value.trim().replace(/\s/g,'').replace(',','.'),amount=Number(raw);if(!Number.isFinite(amount)||amount<0)return $('#planAmount').focus();plans.unshift({id:crypto.randomUUID(),month:$('#planMonth').value,client:$('#planClient').value.trim(),purpose:$('#planPurpose').value.trim(),amount,received:false});savePlans();render('decomposition')};$('#planAdd').onclick=addPlan;$$('[data-plan-toggle]').forEach(b=>b.onclick=()=>{plans=plans.map(p=>p.id===b.dataset.planToggle?{...p,received:!p.received}:p);savePlans();render('decomposition')});$$('[data-plan-delete]').forEach(b=>b.onclick=()=>{plans=plans.filter(p=>p.id!==b.dataset.planDelete);savePlans();render('decomposition')});const addIdea=()=>{const title=$('#ideaTitle').value.trim();if(!title)return;ideas.unshift({id:crypto.randomUUID(),title});savePlans();render('decomposition')};$('#ideaAdd').onclick=addIdea;$('#ideaTitle').onkeydown=e=>{if(e.key==='Enter')addIdea()};$$('[data-idea-delete]').forEach(b=>b.onclick=()=>{ideas=ideas.filter(i=>i.id!==b.dataset.ideaDelete);savePlans();render('decomposition')})}
-function investmentPositions(){const map={};records.filter(r=>r.type==='work'&&r.category==='У крипто'&&r.investmentCoin).forEach(r=>{const coin=r.investmentCoin.toUpperCase(),quantity=Number(r.investmentQuantity)||0,amount=Number(r.amount)||0;if(!map[coin])map[coin]={coin,quantity:0,amount:0,wallets:new Set};map[coin].quantity+=quantity;map[coin].amount+=amount;if(r.investmentPortfolio)map[coin].wallets.add(r.investmentPortfolio)});return Object.values(map).map(p=>({...p,average:p.quantity?p.amount/p.quantity:0,wallets:[...p.wallets]})).sort((a,b)=>b.amount-a.amount)}
-function investmentRow(r){const cryptoBuy=r.category==='У крипто',label=cryptoBuy?(r.investmentCoin||'Крипто').toUpperCase():(r.name||'Інвестиція у блог'),details=cryptoBuy?[r.investmentPortfolio,r.investmentPrice&&`курс ${fmtUSDT(r.investmentPrice)}`,r.investmentQuantity&&`${r.investmentQuantity} ${label}`].filter(Boolean).join(' · '):[r.paymentSource&&`оплачено з: ${r.paymentSource}`,r.note].filter(Boolean).join(' · ');return `<div class="row investment-row"><div class="row-icon">${cryptoBuy?'₿':'◉'}</div><div><b>${esc(label)}</b><span class="investment-kind">${cryptoBuy?'крипто':'блог'}</span><small>${new Date(r.date+'T12:00').toLocaleDateString('uk-UA')}${details?' · '+esc(details):''}</small></div><div class="amount">${cryptoBuy?fmtUSDT(r.amount):fmt(r.amount)}</div><div class="row-actions"><button class="edit" data-id="${r.id}" title="Редагувати">✎</button><button class="delete" data-id="${r.id}" title="Видалити">×</button></div></div>`}
-async function loadMarketPrices(positions){await Promise.all(positions.map(async p=>{const priceEl=document.querySelector(`[data-live-price="${p.coin}"]`),pnlEl=document.querySelector(`[data-live-pnl="${p.coin}"]`);if(!priceEl||!pnlEl)return;try{const response=await fetch(`https://data-api.binance.vision/api/v3/ticker/price?symbol=${encodeURIComponent(p.coin+'USDT')}`);if(!response.ok)throw 0;const data=await response.json(),price=Number(data.price);if(!Number.isFinite(price))throw 0;const pnl=(price-p.average)*p.quantity,percent=p.average?(price/p.average-1)*100:0;priceEl.textContent=fmtUSDT(price);pnlEl.textContent=`${pnl>=0?'+ ':''}${fmtUSDT(pnl)} (${percent>=0?'+':''}${percent.toFixed(2)}%)`;pnlEl.style.color=pnl>=0?'var(--lime)':'#ff8b32'}catch{priceEl.textContent='Недоступно';pnlEl.textContent='Немає пари на Binance'}}))}
-function renderInvestments(c){$('.toolbar').style.display='flex';$('#addBtn').style.display='';const positions=investmentPositions(),all=records.filter(r=>r.type==='work'),shown=visible().filter(r=>r.type==='work').sort((a,b)=>b.date.localeCompare(a.date)),cryptoTotal=positions.reduce((a,p)=>a+p.amount,0),blogTotal=all.filter(r=>r.category!=='У крипто').reduce((a,r)=>a+Number(r.amount),0);c.innerHTML=`<div class="stats investment-summary"><div class="card"><div class="label">У блог</div><div class="value accent">${fmt(blogTotal)}</div></div><div class="card"><div class="label">У крипто</div><div class="value">${fmtUSDT(cryptoTotal)}</div></div><div class="card"><div class="label">Криптопозицій</div><div class="value">${positions.length}</div></div></div><div class="section-title"><h2>Криптопозиції</h2><span>Середня ціна за весь час · курс Binance</span></div><div class="position-grid">${positions.length?positions.map(p=>`<div class="card position-card"><div class="position-head"><div><div class="coin-symbol">${esc(p.coin)}</div><small class="position-wallets">${esc(p.wallets.join(' · ')||'Портфель не вказано')}</small></div><div class="position-wallets">${p.quantity.toLocaleString('uk-UA',{maximumFractionDigits:8})} ${esc(p.coin)}</div></div><div class="position-metrics"><div><span>Середня закупка</span><b>${fmtUSDT(p.average)}</b></div><div><span>Вкладено</span><b>${fmtUSDT(p.amount)}</b></div><div><span>Актуальний курс</span><b data-live-price="${esc(p.coin)}">Оновлення…</b></div><div><span>Результат</span><b data-live-pnl="${esc(p.coin)}">Оновлення…</b></div></div></div>`).join(''):'<div class="card empty">Додайте першу покупку криптовалюти</div>'}</div><div class="card page-table"><div class="section-title"><h2>Історія інвестицій</h2><span>${shown.length}</span></div>${shown.length?shown.map(investmentRow).join(''):'<div class="empty">За цей період записів немає</div>'}</div>`;bindRows();loadMarketPrices(positions)}
 function render(key='overview'){
 current=key;document.body.dataset.section=key;$$('nav button').forEach(b=>b.classList.toggle('active',b.dataset.key===key));$('#eyebrow').textContent=TYPES[key][0].toUpperCase();$('#title').textContent=TYPES[key][1];const data=visible(),c=$('#content');
-if(key==='tasks'){renderTasks(c);return}if(key==='decomposition'){renderDecomposition(c);return}if(key==='work'){renderInvestments(c);return}
+if(key==='tasks'){renderTasks(c);return}if(key==='decomposition'){renderDecomposition(c);return}
 $('.toolbar').style.display='flex';$('#addBtn').style.display='';
+if (key === 'work' || key === 'crypto') {
+  if (key === 'work') renderInvestments(c, data);
+  else renderCrypto(c, data);
+  bindRows();
+  return;
+}
 if(key==='overview'){
-c.innerHTML=`<div class="stats"><div class="card"><div class="label">Капітал у гривнях</div><div class="value accent">${fmt(currentCapital()+sum('savings'))}</div></div><div class="card"><div class="label">Надходження</div><div class="value accent">${fmt(sum('income'))}</div></div><div class="card expense-summary"><div class="label">Витрати</div><div class="value">${fmt(sum('expense'))}</div></div><div class="card"><div class="label">Крипто</div><div class="value">${fmtUSDT(sum('crypto'))}</div></div></div><div class="split"><div class="card income-panel"><div class="section-title"><h2>Напрями надходжень</h2></div>${bars(groups('income',CATEGORIES.income),'income')}</div><div class="card"><div class="section-title"><h2>Капітал у банках</h2></div>${bars(capitalGroups(),'capital')}</div></div><div class="card expense-panel"><div class="section-title"><h2>Витрати за категоріями</h2></div>${bars(groups('expense',CATEGORIES.expense),'expense')}</div><div class="card breakdown income-panel"><div class="section-title"><h2>Надходження за останні 6 місяців</h2></div>${monthlyAnalytics('income')}</div><div class="card breakdown expense-panel"><div class="section-title"><h2>Витрати за останні 6 місяців</h2></div>${monthlyAnalytics('expense')}</div><div class="card page-table"><div class="section-title"><h2>Останні записи</h2></div>${data.length?[...data].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6).map(row).join(''):'<div class="empty">За цей період записів немає</div>'}</div>`
+const positions = investmentPositions(), wallets = walletCash();
+const cryptoTotals = cryptoSummary(wallets, positions);
+c.innerHTML=`<div class="stats"><div class="card"><div class="label">Капітал у гривнях</div><div class="value accent">${fmt(currentCapital()+sum('savings'))}</div></div><div class="card"><div class="label">Надходження</div><div class="value accent">${fmt(sum('income'))}</div></div><div class="card expense-summary"><div class="label">Витрати</div><div class="value">${fmt(sum('expense'))}</div></div><div class="card"><div class="label">Крипто</div><div class="value" id="overviewCryptoTotal">${fmtUSDT(cryptoTotals.total)}</div><small id="overviewCryptoBasis" class="crypto-note">${cryptoTotals.basis}</small></div></div><div class="split"><div class="card income-panel"><div class="section-title"><h2>Напрями надходжень</h2></div>${bars(groups('income',CATEGORIES.income),'income')}</div><div class="card"><div class="section-title"><h2>Капітал у банках</h2></div>${bars(capitalGroups(),'capital')}</div></div><div class="card expense-panel"><div class="section-title"><h2>Витрати за категоріями</h2></div>${bars(groups('expense',CATEGORIES.expense),'expense')}</div><div class="card breakdown income-panel"><div class="section-title"><h2>Надходження за останні 6 місяців</h2></div>${monthlyAnalytics('income')}</div><div class="card breakdown expense-panel"><div class="section-title"><h2>Витрати за останні 6 місяців</h2></div>${monthlyAnalytics('expense')}</div><div class="card page-table"><div class="section-title"><h2>Останні записи</h2></div>${data.length?[...data].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6).map(row).join(''):'<div class="empty">За цей період записів немає</div>'}</div>`
+const total = $('#overviewCryptoTotal'), basis = $('#overviewCryptoBasis');
+loadMarketPrices(total, positions, () => {
+  const updated = cryptoSummary(wallets, positions);
+  total.textContent = fmtUSDT(updated.total);
+  basis.textContent = updated.basis;
+});
 }else{
 const rr=data.filter(r=>r.type===key).sort((a,b)=>b.date.localeCompare(a.date)),breakdown=CATEGORIES[key]?`<div class="card breakdown"><div class="section-title"><h2>${key==='income'?'Напрями надходжень':'Розподіл'}</h2></div>${key==='capital'?bars(capitalGroups(),'capital'):bars(groups(key,CATEGORIES[key]),key)}</div>`:'',timeline=key==='income'?`<div class="card breakdown"><div class="section-title"><h2>Надходження за останні 6 місяців</h2></div>${monthlyAnalytics('income')}</div>`:'',displayTotal=key==='capital'?currentCapital():sum(key),expected=key==='income'?`<div class="card expected-point"><div class="label">Очікуються надходження</div><div class="value">${fmt(expectedTotal())}</div><div class="usd-value">Заплановано в декомпозиції</div></div>`:'';
 c.innerHTML=`<div class="stats"><div class="card"><div class="label">Загальна сума</div><div class="value accent">${money(key,displayTotal)}</div>${key==='crypto'?'':`<div class="usd-value">≈ ${fmtUSD(displayTotal)} · курс ${USD_RATE} ₴/$</div>`}</div><div class="card"><div class="label">Кількість записів</div><div class="value">${rr.length}</div></div>${expected}</div>${breakdown}${timeline}<div class="card page-table"><div class="section-title"><h2>Усі записи</h2></div>${rr.length?recordList(key,rr):'<div class="empty">За цей період записів немає</div>'}</div>`
 }bindRows()}
 const dlg=$('#entryDialog'),form=$('#entryForm'),type=$('#type');
-function syncForm(selected){const isIncome=type.value==='income',isExpense=type.value==='expense',isInvestment=type.value==='work',cats=CATEGORIES[type.value],cl=$('#categoryLabel'),cat=$('#category');cl.style.display=cats?'grid':'none';if(cats){cat.innerHTML=cats.map(x=>`<option>${x}</option>`).join('');if(selected&&cats.includes(selected))cat.value=selected}const cryptoInvestment=isInvestment&&cat.value==='У крипто',blogInvestment=isInvestment&&!cryptoInvestment;$('#categoryCaption').textContent=isIncome?'Напрям':isInvestment?'Тип інвестиції':'Категорія';$('#amountCaption').textContent=type.value==='crypto'||cryptoInvestment?'Сума покупки, USDT':isInvestment?'Сума інвестиції, ₴':'Сума, ₴';$('#cryptoInvestmentFields').hidden=!cryptoInvestment;$('#investmentCoin').required=cryptoInvestment;$('#investmentPrice').required=cryptoInvestment;$('#investmentQuantity').required=cryptoInvestment;$('#paymentSourceLabel').hidden=!(isExpense||blogInvestment);$('#nameLabel').style.display=(!cats||isIncome||blogInvestment)?'grid':'none';$('#nameCaption').textContent=isIncome?'Джерело (необов’язково)':blogInvestment?'Назва блогу / проєкту':'Назва / де знаходиться';$('#name').placeholder=isIncome?'Instagram, рекомендація, сайт':blogInvestment?'Наприклад: особистий блог':'Наприклад: депозит';$('#counterpartyLabel').hidden=!isIncome;$('#purposeLabel').hidden=!isIncome;$('#name').required=false;$('#counterparty').required=false;$('#purpose').required=false}
-function openEntry(r=null){const selectedType=r?.type||(current==='overview'||current==='decomposition'||current==='tasks'?'expense':current);form.reset();$('#editId').value=r?.id||'';$('#dialogEyebrow').textContent=r?'РЕДАГУВАННЯ':'НОВИЙ ЗАПИС';$('#dialogTitle').textContent=r?'Змінити запис':'Додати до фінансів';type.value=selectedType;syncForm(r?.category);$('#amount').value=r?.amount??'';$('#date').value=r?.date||new Date().toISOString().slice(0,10);$('#paymentSource').value=r?.paymentSource||'';$('#investmentCoin').value=r?.investmentCoin||'';$('#investmentPrice').value=r?.investmentPrice||'';$('#investmentQuantity').value=r?.investmentQuantity||'';$('#investmentPortfolio').value=r?.investmentPortfolio||'Hyperliquid';$('#name').value=r?.name||'';$('#counterparty').value=r?.counterparty||'';$('#purpose').value=r?.purpose||'';$('#note').value=r?.note||'';dlg.showModal();requestAnimationFrame(()=>{type.value=selectedType;syncForm(r?.category);setTimeout(()=>$('#amount').focus(),0)})}
-type.onchange=()=>syncForm();$('#category').onchange=()=>syncForm($('#category').value);$('#addBtn').onclick=()=>openEntry();
-form.onsubmit=e=>{if(e.submitter?.value==='cancel')return;const parse=v=>Number(String(v).trim().replace(/\s/g,'').replace(',','.')),amount=parse($('#amount').value),cryptoInvestment=type.value==='work'&&$('#category').value==='У крипто',price=parse($('#investmentPrice').value),quantity=parse($('#investmentQuantity').value);if(!Number.isFinite(amount)||amount<0){e.preventDefault();$('#amount').setCustomValidity('Введіть коректну суму');$('#amount').reportValidity();$('#amount').setCustomValidity('');return}if(cryptoInvestment&&(!Number.isFinite(price)||price<=0||!Number.isFinite(quantity)||quantity<=0)){e.preventDefault();const field=!Number.isFinite(price)||price<=0?$('#investmentPrice'):$('#investmentQuantity');field.setCustomValidity('Введіть число більше нуля');field.reportValidity();field.setCustomValidity('');return}const id=$('#editId').value,item={id:id||crypto.randomUUID(),type:type.value,category:$('#category').value,amount,date:$('#date').value,paymentSource:type.value==='expense'||(type.value==='work'&&!cryptoInvestment)?$('#paymentSource').value:'',investmentCoin:cryptoInvestment?$('#investmentCoin').value.trim().toUpperCase():'',investmentPrice:cryptoInvestment?price:0,investmentQuantity:cryptoInvestment?quantity:0,investmentPortfolio:cryptoInvestment?$('#investmentPortfolio').value:'',name:$('#name').value.trim(),counterparty:$('#counterparty').value.trim(),purpose:$('#purpose').value.trim(),note:$('#note').value.trim()};records=id?records.map(r=>r.id===id?item:r):[...records,item];save();setTimeout(()=>render(item.type),0)};
+const entryCategory = $('#category'), entryOperation = $('#cryptoOperation');
+function syncForm(selectedCategory) {
+  const section = type.value;
+  const isCrypto = section === 'crypto';
+  const isIncome = section === 'income';
+  const isBlog = section === 'work';
+  const categories = isBlog ? ['У блог'] : CATEGORIES[section];
+  $('#categoryLabel').hidden = !categories;
+  $('#cryptoOperationLabel').hidden = !isCrypto;
+  entryCategory.required = isCrypto;
+  entryCategory.replaceChildren();
+  if (categories) {
+    const choices = isCrypto ? [...categories, ...(selectedCategory && !categories.includes(selectedCategory) ? [selectedCategory] : [])] : categories;
+    if (isCrypto) entryCategory.add(new Option('Виберіть портфель', ''));
+    for (const label of choices) entryCategory.add(new Option(label, label));
+    if (choices.includes(selectedCategory)) entryCategory.value = selectedCategory;
+  }
+  $('#categoryCaption').textContent = isCrypto ? 'Криптопортфель' : isIncome ? 'Напрям' : isBlog ? 'Тип інвестиції' : 'Категорія';
+  $('#paymentSourceLabel').hidden = !(section === 'expense' || isBlog);
+  $('#nameLabel').hidden = !!categories && !isIncome && !isBlog;
+  $('#nameCaption').textContent = isIncome ? 'Джерело (необов’язково)' : isBlog ? 'Назва блогу / проєкту' : 'Назва / де знаходиться';
+  $('#name').placeholder = isIncome ? 'Instagram, рекомендація, сайт' : isBlog ? 'Наприклад: особистий блог' : 'Наприклад: депозит';
+  $('#counterpartyLabel').hidden = !isIncome;
+  $('#purposeLabel').hidden = !isIncome;
+  syncCryptoFields();
+}
+
+function syncCryptoFields() {
+  const isCrypto = type.value === 'crypto';
+  const buy = isCrypto && entryOperation.value === 'investment';
+  $('#amountCaption').textContent = buy ? 'Сума покупки, USDT'
+    : isCrypto ? 'Сума, USDT' : type.value === 'work' ? 'Сума інвестиції, ₴' : 'Сума, ₴';
+  $('#cryptoInvestmentFields').hidden = !buy;
+  for (const field of ['#investmentCoin', '#investmentPrice', '#investmentQuantity']) $(field).required = buy;
+}
+
+function openEntry(record = null, operation = 'deposit', defaultCoin = '') {
+  const legacyBuy = record && isLegacyCryptoBuy(record);
+  const section = legacyBuy || (!record && operation === 'investment') ? 'crypto'
+    : record?.type || (['overview', 'decomposition', 'tasks'].includes(current) ? 'expense' : current);
+  const category = legacyBuy ? cryptoWallet(record) : record?.category;
+  form.reset();
+  $('#editId').value = record?.id || '';
+  $('#dialogEyebrow').textContent = record ? 'РЕДАГУВАННЯ' : 'НОВИЙ ЗАПИС';
+  $('#dialogTitle').textContent = record ? 'Змінити запис' : 'Додати до фінансів';
+  type.value = section;
+  entryOperation.value = legacyBuy ? 'investment' : (record?.cryptoOperation || operation);
+  syncForm(category);
+  $('#amount').value = record?.amount ?? '';
+  $('#date').value = record?.date || new Date().toLocaleDateString('sv-SE');
+  $('#paymentSource').value = record?.paymentSource || '';
+  $('#investmentCoin').value = record?.investmentCoin || defaultCoin;
+  $('#investmentPrice').value = record?.investmentPrice || '';
+  $('#investmentQuantity').value = record?.investmentQuantity || '';
+  $('#name').value = record?.name || '';
+  $('#counterparty').value = record?.counterparty || '';
+  $('#purpose').value = record?.purpose || '';
+  $('#note').value = record?.note || '';
+  dlg.showModal();
+  $('#amount').focus();
+}
+type.onchange = () => syncForm();
+entryOperation.onchange = syncCryptoFields;
+$('#addBtn').onclick = () => openEntry();
+
+form.onsubmit = event => {
+  if (event.submitter?.value === 'cancel') return;
+  const invalid = (field, message) => {
+    event.preventDefault();
+    field.setCustomValidity(message);
+    field.reportValidity();
+    field.setCustomValidity('');
+  };
+  const parse = field => Number($(field).value.trim().replace(/\s/g, '').replace(',', '.'));
+  const amount = parse('#amount');
+  const isCrypto = type.value === 'crypto';
+  const operation = entryOperation.value;
+  const buy = isCrypto && operation === 'investment';
+  const coin = cryptoTicker($('#investmentCoin').value);
+  const price = parse('#investmentPrice');
+  const quantity = parse('#investmentQuantity');
+  if (!Number.isFinite(amount) || amount < 0 || (isCrypto && amount === 0)) {
+    return invalid($('#amount'), isCrypto ? 'Введіть суму більше нуля' : 'Введіть коректну суму');
+  }
+  if (buy) {
+    if (!/^[A-Z0-9]{1,20}$/.test(coin)) return invalid($('#investmentCoin'), 'Введіть тикер монети, наприклад SOL');
+    if (!Number.isFinite(price) || price <= 0) return invalid($('#investmentPrice'), 'Введіть курс більше нуля');
+    if (!Number.isFinite(quantity) || quantity <= 0) return invalid($('#investmentQuantity'), 'Введіть кількість більше нуля');
+  }
+
+  const id = $('#editId').value;
+  const original = records.find(record => record.id === id);
+  const legacyBuy = buy && original && isLegacyCryptoBuy(original);
+  const item = {
+    id: id || crypto.randomUUID(),
+    type: legacyBuy ? 'work' : type.value,
+    category: legacyBuy ? 'У крипто' : entryCategory.value,
+    amount,
+    date: $('#date').value,
+    paymentSource: ['expense', 'work'].includes(type.value) ? $('#paymentSource').value : '',
+    name: $('#name').value.trim(),
+    counterparty: $('#counterparty').value.trim(),
+    purpose: $('#purpose').value.trim(),
+    note: $('#note').value.trim(),
+  };
+  if (isCrypto && !legacyBuy) item.cryptoOperation = operation;
+  if (buy) {
+    item.investmentCoin = coin;
+    item.investmentPrice = price;
+    item.investmentQuantity = quantity;
+    if (legacyBuy) item.investmentPortfolio = entryCategory.value;
+  }
+  const updated = id ? records.map(record => record.id === id ? item : record) : [...records, item];
+  const balanceError = cryptoBalanceError(updated);
+  if (balanceError) return invalid($('#amount'), balanceError);
+  records = updated;
+  save();
+  const nextView = buy ? (current === 'work' ? 'work' : 'crypto') : item.type;
+  setTimeout(() => render(nextView), 0);
+};
 const mf=$('#monthFilter');mf.value=period;mf.onchange=()=>{period=mf.value;render(current)};$('#allTimeBtn').onclick=()=>{period='';mf.value='';render(current)};
 $('#exportBtn').onclick=()=>{const blob=new Blob([JSON.stringify({app:'mfi',version:3,exportedAt:new Date().toISOString(),records,tasks,plans,ideas},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`mfi-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href)};
 const file=$('#importFile');$('#importBtn').onclick=()=>file.click();file.onchange=async()=>{try{const parsed=JSON.parse(await file.files[0].text()),incoming=Array.isArray(parsed)?parsed:parsed.records;if(!Array.isArray(incoming))throw 0;if(!confirm(`Відновити ${incoming.length} записів? Поточні дані буде замінено.`))return;records=incoming;if(Array.isArray(parsed.tasks))tasks=parsed.tasks;if(Array.isArray(parsed.plans))plans=parsed.plans;if(Array.isArray(parsed.ideas))ideas=parsed.ideas;save();saveTasks();savePlans();render(current);alert('Резервну копію відновлено')}catch{alert('Не вдалося прочитати резервну копію')}finally{file.value=''}};
