@@ -1,0 +1,43 @@
+.etsy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+  margin-top: 14px;
+}
+.etsy-grid .section-title { flex-wrap: wrap; gap: 10px; }
+.etsy-stats .card { min-width: 0; overflow-wrap: anywhere; }
+.etsy-loss { color: #ff9c5b; }
+.etsy-breakdown-list { margin: 0; }
+.etsy-breakdown-list div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.etsy-breakdown-list div:last-child { border-bottom: 0; }
+.etsy-breakdown-list dd { margin: 0; font-weight: 700; white-space: nowrap; }
+.etsy-table-scroll { overflow-x: auto; }
+.etsy-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.etsy-table th, .etsy-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+.etsy-table thead th { color: var(--muted); font-size: .875rem; }
+.etsy-table tr > :first-child { text-align: left; }
+.etsy-table td:last-child { font-weight: 700; }
+.etsy-table tbody tr:last-child > * { border-bottom: 0; }
+.etsy-row { grid-template-columns: 32px minmax(0, 1fr) auto 56px; gap: 8px; }
+.etsy-row .row-icon { width: 30px; height: 30px; }
+.etsy-row > div { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 1060px) { .etsy-grid { grid-template-columns: 1fr; } }
+@media (max-width: 550px) {
+  .etsy-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .etsy-row .row-icon { display: none; }
+  .etsy-row .amount { grid-column: 1; justify-self: start; }
+  .etsy-row .row-actions { grid-column: 2; grid-row: 1 / 3; }
+}

@@ -195,6 +195,10 @@ function renderCrypto(content, visibleRecords) {
   const solPurchases = purchases.filter(record => cryptoTicker(record.investmentCoin) === 'SOL')
     .sort((a, b) => b.date.localeCompare(a.date));
   const sol = positions.find(position => position.coin === 'SOL') || { coin: 'SOL', amount: 0, quantity: 0 };
+  const otherPositions = positions.filter(position => position.coin !== 'SOL');
+  const otherPurchases = visibleRecords
+    .filter(record => isCryptoBuy(record) && cryptoTicker(record.investmentCoin) !== 'SOL')
+    .sort((a, b) => b.date.localeCompare(a.date));
   const wallets = walletCash();
   const totals = cryptoSummary(wallets, positions);
   const movements = visibleRecords.filter(record => record.type === 'crypto' && !isCryptoBuy(record))
@@ -227,17 +231,22 @@ function renderCrypto(content, visibleRecords) {
       <div class="section-title"><h2>Рух USDT</h2></div>
       ${movements.length ? movements.map(cryptoMovementRow).join('') : '<div class="empty">За цей період поповнень і списань немає</div>'}
     </div>
-    <div class="card breakdown" id="solPosition">
+    <div id="cryptoPositions"><div class="card breakdown" id="solPosition">
       <div class="section-title"><h2>SOL</h2><button id="addSolPurchase" class="ghost">Додати покупку SOL</button></div>
       ${positionMetrics(sol, positions.indexOf(sol))}
       <h3 class="sol-history-title">Покупки SOL</h3>
       ${solPurchases.length ? solPurchases.map(record => investmentRow(record, true)).join('') : '<div class="empty">Покупок SOL ще немає</div>'}
     </div>
-    <button class="ghost" id="allCryptoInvestments">Усі криптоінвестиції</button>`;
-  $('#allCryptoInvestments').onclick = () => render('work');
+    ${otherPositions.length ? `<div class="breakdown"><div class="section-title"><h2>Інші криптопозиції</h2></div>
+      <div class="position-grid">${otherPositions.map(position => `<div class="card position-card">
+        <div class="position-head"><div><div class="coin-symbol">${esc(position.coin)}</div><small class="position-wallets">${esc([...position.wallets].join(' · '))}</small></div></div>
+        ${positionMetrics(position, positions.indexOf(position))}</div>`).join('')}</div></div>` : ''}
+    ${otherPositions.length || otherPurchases.length ? `<div class="card breakdown"><div class="section-title"><h2>Інші криптопокупки</h2></div>
+      ${otherPurchases.length ? otherPurchases.map(record => investmentRow(record, true)).join('') : '<div class="empty">За цей період покупок немає</div>'}</div>` : ''}
+    </div>`;
   $('#addSolPurchase').onclick = () => openEntry(null, 'investment', 'SOL');
   const total = $('#cryptoTotal'), value = $('#cryptoInvestedValue'), basis = $('#cryptoBasis');
-  loadMarketPrices($('#solPosition'), positions, () => {
+  loadMarketPrices($('#cryptoPositions'), positions, () => {
     const updated = cryptoSummary(wallets, positions);
     total.textContent = fmtUSDT(updated.total);
     value.textContent = fmtUSDT(updated.value);
@@ -246,25 +255,13 @@ function renderCrypto(content, visibleRecords) {
 }
 
 function renderInvestments(content, visibleRecords) {
-  const positions = investmentPositions();
-  const blogTotal = records.filter(record => record.type === 'work' && !isCryptoBuy(record))
-    .reduce((total, record) => total + Number(record.amount), 0);
-  const purchases = visibleRecords.filter(isCryptoBuy).sort((a, b) => b.date.localeCompare(a.date));
   const blog = visibleRecords.filter(record => record.type === 'work' && !isCryptoBuy(record))
     .sort((a, b) => b.date.localeCompare(a.date));
-  content.innerHTML = `<div id="investmentView"><div class="stats investment-summary">
-    <div class="card"><div class="label">У блог</div><div class="value accent">${fmt(blogTotal)}</div></div>
-    <div class="card"><div class="label">Вкладено в крипто</div><div class="value">${fmtUSDT(positions.reduce((total, p) => total + p.amount, 0))}</div></div>
-    <div class="card"><div class="label">Криптопозицій</div><div class="value">${positions.length}</div></div>
+  const blogTotal = blog.reduce((total, record) => total + Number(record.amount), 0);
+  content.innerHTML = `<div class="stats">
+    <div class="card"><div class="label">Вкладено у блог</div><div class="value accent">${fmt(blogTotal)}</div></div>
+    <div class="card"><div class="label">Кількість вкладень</div><div class="value">${blog.length}</div></div>
     </div>
-    <div class="section-title"><h2>Криптопозиції</h2><button id="addCryptoInvestment" class="ghost">Додати криптоінвестицію</button></div>
-    <div class="position-grid" id="positionGrid">${positions.map((p, index) => `<div class="card position-card">
-      <div class="position-head"><div><div class="coin-symbol">${esc(p.coin)}</div><small class="position-wallets">${esc([...p.wallets].join(' · '))}</small></div></div>
-      ${positionMetrics(p, index)}</div>`).join('')}</div>
-    <div class="card breakdown"><div class="section-title"><h2>Історія криптопокупок</h2></div>
-      ${purchases.length ? purchases.map(record => investmentRow(record, true)).join('') : '<div class="empty">За цей період покупок немає</div>'}</div>
     <div class="card breakdown"><div class="section-title"><h2>Вкладення у блог</h2></div>
-      ${blog.length ? blog.map(record => investmentRow(record)).join('') : '<div class="empty">За цей період записів немає</div>'}</div></div>`;
-  $('#addCryptoInvestment').onclick = () => openEntry(null, 'investment');
-  loadMarketPrices($('#investmentView'), positions);
+      ${blog.length ? blog.map(record => investmentRow(record)).join('') : '<div class="empty">За цей період записів немає</div>'}</div>`;
 }

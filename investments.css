@@ -15,7 +15,6 @@
 .crypto-wallet span, .crypto-wallet small { color: var(--muted); }
 .crypto-wallet small { display: block; margin-top: 8px; }
 .sol-history-title { margin: 24px 0 4px; font-size: 1rem; }
-#allCryptoInvestments { margin-top: 14px; }
 .investment-row > div { min-width: 0; overflow-wrap: anywhere; }
 .solana-mark { display: block; object-fit: contain; }
 .purchase-pnl { display: block; margin-top: 4px; font-size: .8125rem; font-weight: 500; }

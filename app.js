@@ -1,6 +1,6 @@
-const TYPES={overview:['Огляд','Фінансова картина','◫'],income:['Надходження','Мої надходження','＋'],expense:['Витрати','Мої витрати','↓'],crypto:['Крипто','Криптопортфель','₿'],capital:['Капітал','Капітал у гривнях','₴'],work:['Інвестиції','Мої інвестиції','◆'],savings:['Заощадження','Мої заощадження','◇'],decomposition:['Декомпозиція','Декомпозиція доходу','◎'],tasks:['Задачі','Задачі по запуску','✓']};
-const CATEGORIES={income:['Продюсування','Послуги','Реклама','E-commerce','Пасивний дохід Botty'],expense:['Продукти','Доставка їжі','Ресторани','Таксі','Оренда житла','Подорожі','Дозвілля','Підписки','Інше'],capital:['А-Банк','Monobank — чорна картка','Monobank — біла картка','Monobank ФОП'],crypto:['Hyperliquid','MetaMask','Phantom Wallet'],work:['У блог','У крипто']};
-const ICONS={'Продюсування':'＋','Послуги':'＋','Реклама':'＋','E-commerce':'＋','Пасивний дохід Botty':'＋','Продукти':'🛒','Доставка їжі':'🥡','Ресторани':'🍽','Таксі':'🚕','Оренда житла':'⌂','Подорожі':'✈','Дозвілля':'✦','Підписки':'↻','Інше':'•••','А-Банк':'A','Monobank — чорна картка':'●','Monobank — біла картка':'○','Monobank ФОП':'Ф','Hyperliquid':'H','MetaMask':'M','Phantom Wallet':'P','У блог':'◉','У крипто':'₿'};
+const TYPES={overview:['Огляд','Фінансова картина','◫'],income:['Надходження','Мої надходження','＋'],expense:['Витрати','Мої витрати','↓'],crypto:['Крипто','Криптопортфель','₿'],capital:['Капітал','Капітал у гривнях','₴'],work:['Інвестиції','Мої інвестиції','◆'],etsy:['Etsy','Etsy','▤'],savings:['Заощадження','Мої заощадження','◇'],decomposition:['Декомпозиція','Декомпозиція доходу','◎'],tasks:['Задачі','Задачі по запуску','✓']};
+const CATEGORIES={income:['Продюсування','Послуги','Реклама','E-commerce','Пасивний дохід Botty'],expense:['Продукти','Доставка їжі','Ресторани','Таксі','Оренда житла','Комунальні','Подорожі','Дозвілля','Підписки','Інше'],capital:['А-Банк','Monobank — чорна картка','Monobank — біла картка','Monobank ФОП'],crypto:['Hyperliquid','MetaMask','Phantom Wallet'],work:['У блог'],etsy:[ETSY_SALE,...ETSY_EXPENSES]};
+const ICONS={'Продюсування':'＋','Послуги':'＋','Реклама':'＋','E-commerce':'＋','Пасивний дохід Botty':'＋','Продукти':'🛒','Доставка їжі':'🥡','Ресторани':'🍽','Таксі':'🚕','Оренда житла':'⌂','Комунальні':'◈','Подорожі':'✈','Дозвілля':'✦','Підписки':'↻','Інше':'•••','А-Банк':'A','Monobank — чорна картка':'●','Monobank — біла картка':'○','Monobank ФОП':'Ф','Hyperliquid':'H','MetaMask':'M','Phantom Wallet':'P','У блог':'◉'};
 let current='overview',period=new Date().toISOString().slice(0,7),records=[],tasks=[],plans=[],ideas=[];
 try{records=JSON.parse(localStorage.getItem('finspace-records')||'[]');if(!Array.isArray(records))records=[]}catch{records=[]}
 try{tasks=JSON.parse(localStorage.getItem('finspace-tasks')||'[]');if(!Array.isArray(tasks))tasks=[]}catch{tasks=[]}
@@ -13,6 +13,7 @@ Object.entries(TYPES).forEach(([k,v])=>{const b=document.createElement('button')
 function row(r) {
   if (isCryptoBuy(r) || r.type === 'work') return investmentRow(r);
   if (r.type === 'crypto') return cryptoMovementRow(r);
+  if (r.type === 'etsy') return etsyRow(r);
   const label = r.type === 'income' ? (r.counterparty || r.category || 'Надходження')
     : ((CATEGORIES[r.type] ? r.category : null) || r.name || TYPES[r.type][0]);
   const details = r.type === 'income' ? [r.category, r.purpose, r.name && `джерело: ${r.name}`]
@@ -55,9 +56,10 @@ function render(key='overview'){
 current=key;document.body.dataset.section=key;$$('nav button').forEach(b=>b.classList.toggle('active',b.dataset.key===key));$('#eyebrow').textContent=TYPES[key][0].toUpperCase();$('#title').textContent=TYPES[key][1];const data=visible(),c=$('#content');
 if(key==='tasks'){renderTasks(c);return}if(key==='decomposition'){renderDecomposition(c);return}
 $('.toolbar').style.display='flex';$('#addBtn').style.display='';
-if (key === 'work' || key === 'crypto') {
+if (['work', 'crypto', 'etsy'].includes(key)) {
   if (key === 'work') renderInvestments(c, data);
-  else renderCrypto(c, data);
+  else if (key === 'crypto') renderCrypto(c, data);
+  else renderEtsy(c, data);
   bindRows();
   return;
 }
@@ -76,7 +78,7 @@ const rr=data.filter(r=>r.type===key).sort((a,b)=>b.date.localeCompare(a.date)),
 c.innerHTML=`<div class="stats"><div class="card"><div class="label">Загальна сума</div><div class="value accent">${money(key,displayTotal)}</div>${key==='crypto'?'':`<div class="usd-value">≈ ${fmtUSD(displayTotal)} · курс ${USD_RATE} ₴/$</div>`}</div><div class="card"><div class="label">Кількість записів</div><div class="value">${rr.length}</div></div>${expected}</div>${breakdown}${timeline}<div class="card page-table"><div class="section-title"><h2>Усі записи</h2></div>${rr.length?recordList(key,rr):'<div class="empty">За цей період записів немає</div>'}</div>`
 }bindRows()}
 const dlg=$('#entryDialog'),form=$('#entryForm'),type=$('#type');
-const entryCategory = $('#category'), entryOperation = $('#cryptoOperation');
+const entryCategory = $('#category'), entryOperation = $('#cryptoOperation'), paymentSource = $('#paymentSource');
 const parseEntryNumber = field => Number($(field).value.trim().replace(/\s/g, '').replace(',', '.'));
 
 function updateInvestmentPrice() {
@@ -91,7 +93,8 @@ function syncForm(selectedCategory) {
   const isCrypto = section === 'crypto';
   const isIncome = section === 'income';
   const isBlog = section === 'work';
-  const categories = isBlog ? ['У блог'] : CATEGORIES[section];
+  const isEtsy = section === 'etsy';
+  const categories = CATEGORIES[section];
   $('#categoryLabel').hidden = !categories;
   $('#cryptoOperationLabel').hidden = !isCrypto;
   entryCategory.required = isCrypto;
@@ -104,13 +107,22 @@ function syncForm(selectedCategory) {
     if (choices.includes(selectedCategory)) entryCategory.value = selectedCategory;
   }
   $('#categoryCaption').textContent = isCrypto ? 'Криптопортфель' : isIncome ? 'Напрям' : isBlog ? 'Тип інвестиції' : 'Категорія';
-  $('#paymentSourceLabel').hidden = !(section === 'expense' || isBlog);
-  $('#nameLabel').hidden = !!categories && !isIncome && !isBlog;
+  $('#nameLabel').hidden = !!categories && !isIncome && !isBlog && !isEtsy;
   $('#nameCaption').textContent = isIncome ? 'Джерело (необов’язково)' : isBlog ? 'Назва блогу / проєкту' : 'Назва / де знаходиться';
   $('#name').placeholder = isIncome ? 'Instagram, рекомендація, сайт' : isBlog ? 'Наприклад: особистий блог' : 'Наприклад: депозит';
   $('#counterpartyLabel').hidden = !isIncome;
   $('#purposeLabel').hidden = !isIncome;
   syncCryptoFields();
+  syncEntryCategoryFields();
+}
+
+function syncEntryCategoryFields() {
+  const isEtsy = type.value === 'etsy';
+  const etsySale = isEtsy && entryCategory.value === ETSY_SALE;
+  $('#paymentSourceLabel').hidden = !(type.value === 'expense' || type.value === 'work' || (isEtsy && !etsySale));
+  if (!isEtsy) return;
+  $('#nameCaption').textContent = etsySale ? 'Товар або № замовлення' : 'Назва витрати';
+  $('#name').placeholder = etsySale ? 'Наприклад: замовлення №102' : 'Наприклад: комісія Etsy';
 }
 
 function syncCryptoFields() {
@@ -129,11 +141,11 @@ function syncCryptoFields() {
   if (buy) updateInvestmentPrice();
 }
 
-function openEntry(record = null, operation = 'deposit', defaultCoin = '') {
+function openEntry(record = null, operation = 'deposit', defaultCoin = '', defaultCategory = '') {
   const legacyBuy = record && isLegacyCryptoBuy(record);
   const section = legacyBuy || (!record && operation === 'investment') ? 'crypto'
     : record?.type || (['overview', 'decomposition', 'tasks'].includes(current) ? 'expense' : current);
-  const category = legacyBuy ? cryptoWallet(record) : record?.category;
+  const category = legacyBuy ? cryptoWallet(record) : (record?.category ?? defaultCategory);
   form.reset();
   $('#editId').value = record?.id || '';
   $('#dialogEyebrow').textContent = record ? 'РЕДАГУВАННЯ' : 'НОВИЙ ЗАПИС';
@@ -143,7 +155,7 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '') {
   syncForm(category);
   $('#amount').value = record?.amount ?? '';
   $('#date').value = record?.date || new Date().toLocaleDateString('sv-SE');
-  $('#paymentSource').value = record?.paymentSource || '';
+  paymentSource.value = record?.paymentSource || '';
   $('#investmentCoin').value = record?.investmentCoin || defaultCoin;
   $('#investmentQuantity').value = record?.investmentQuantity || '';
   updateInvestmentPrice();
@@ -156,6 +168,7 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '') {
 }
 type.onchange = () => syncForm();
 entryOperation.onchange = syncCryptoFields;
+entryCategory.onchange = syncEntryCategoryFields;
 $('#amount').addEventListener('input', updateInvestmentPrice);
 $('#investmentQuantity').addEventListener('input', updateInvestmentPrice);
 $('#addBtn').onclick = () => openEntry();
@@ -178,6 +191,12 @@ form.onsubmit = event => {
   if (!Number.isFinite(amount) || amount < 0 || (isCrypto && amount === 0)) {
     return invalid($('#amount'), isCrypto ? 'Введіть суму більше нуля' : 'Введіть коректну суму');
   }
+  if (type.value === 'etsy') {
+    const cents = amountInCents(amount);
+    if (!Number.isSafeInteger(cents) || cents <= 0 || Math.abs(amount - cents / 100) > 1e-8) {
+      return invalid($('#amount'), 'Введіть суму більше нуля, до двох знаків після коми');
+    }
+  }
   if (buy) {
     if (!/^[A-Z0-9]{1,20}$/.test(coin)) return invalid($('#investmentCoin'), 'Введіть тикер монети, наприклад SOL');
     if (!Number.isFinite(quantity) || quantity <= 0) return invalid($('#investmentQuantity'), 'Введіть кількість більше нуля');
@@ -193,7 +212,7 @@ form.onsubmit = event => {
     category: legacyBuy ? 'У крипто' : entryCategory.value,
     amount,
     date: $('#date').value,
-    paymentSource: ['expense', 'work'].includes(type.value) ? $('#paymentSource').value : '',
+    paymentSource: $('#paymentSourceLabel').hidden ? '' : paymentSource.value,
     name: $('#name').value.trim(),
     counterparty: $('#counterparty').value.trim(),
     purpose: $('#purpose').value.trim(),
@@ -211,7 +230,7 @@ form.onsubmit = event => {
   if (balanceError) return invalid($('#amount'), balanceError);
   records = updated;
   save();
-  const nextView = buy ? (current === 'work' ? 'work' : 'crypto') : item.type;
+  const nextView = buy ? 'crypto' : item.type;
   setTimeout(() => render(nextView), 0);
 };
 const mf=$('#monthFilter');mf.value=period;mf.onchange=()=>{period=mf.value;render(current)};$('#allTimeBtn').onclick=()=>{period='';mf.value='';render(current)};
