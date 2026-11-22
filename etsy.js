@@ -36,10 +36,7 @@ function etsyStats(entries) {
 
 function etsyRow(record) {
   const sale = isEtsySale(record);
-  const debit = etsyWalletDebit(record);
-  const details = [cryptoDate(record), record.name && record.category,
-    record.paymentSource && `оплачено з: ${record.paymentSource}`,
-    debit && `списано ${tokenPrice(debit)}`, record.note];
+  const details = [cryptoDate(record), record.name && record.category, paymentDetails(record), record.note];
   return `<div class="row etsy-row">
     <div class="row-icon" aria-hidden="true">${sale ? '+' : '−'}</div>
     <div><b>${esc(record.name || record.category)}</b><small>${esc(details.filter(Boolean).join(' · '))}</small></div>

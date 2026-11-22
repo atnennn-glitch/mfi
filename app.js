@@ -17,7 +17,7 @@ function row(r) {
   const label = r.type === 'income' ? (r.counterparty || r.category || 'Надходження')
     : ((CATEGORIES[r.type] ? r.category : null) || r.name || TYPES[r.type][0]);
   const details = r.type === 'income' ? [r.category, r.purpose, r.name && `джерело: ${r.name}`]
-    : [r.paymentSource && `оплачено з: ${r.paymentSource}`, r.note];
+    : [paymentDetails(r), r.note];
   return `<div class="row"><div class="row-icon">${ICONS[r.category] || ICONS[label] || TYPES[r.type][2]}</div>
     <div><b>${esc(label)}</b><small>${esc([cryptoDate(r), ...details.filter(Boolean)].join(' · '))}</small></div>
     <div class="amount">${money(r.type,r.amount)}</div>${recordActions(r)}</div>`;
@@ -40,7 +40,44 @@ function bindRows() {
   });
 }
 function groups(type,names){return names.map(n=>[n,visible().filter(r=>r.type===type&&r.category===n).reduce((a,r)=>a+Number(r.amount),0)])}
-function capitalGroups(){return CATEGORIES.capital.map(n=>[n,records.filter(r=>r.type==='capital'&&r.category===n).reduce((a,r)=>a+Number(r.amount),0)-records.filter(r=>r.type==='expense'&&r.paymentSource===n).reduce((a,r)=>a+Number(r.amount),0)])}
+function linkedPaymentDebit(record) {
+  const { type, paymentSource: account, amount: rawAmount } = record;
+  if (!['expense', 'work', 'etsy'].includes(type) || isCryptoBuy(record)) return null;
+  if (type === 'etsy' && isEtsySale(record)) return null;
+  const amount = Number(rawAmount);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (account === ETSY_WALLET) {
+    const usdt = type === 'etsy' ? etsyWalletDebit(record) : amountInCents(amount / USD_RATE) / 100;
+    return usdt > 0 ? { account, amount: usdt, currency: 'USDT' } : null;
+  }
+  if (!CATEGORIES.capital.includes(account)) return null;
+  const hryvnia = type === 'etsy' && record.currency === 'USD' ? amount * USD_RATE : amount;
+  return { account, amount: amountInCents(hryvnia) / 100, currency: 'UAH' };
+}
+
+function formattedDebit(debit) {
+  return debit.currency === 'USDT' ? tokenPrice(debit.amount) : fmt(debit.amount);
+}
+
+function paymentDetails(record) {
+  if (!record.paymentSource) return '';
+  const debit = linkedPaymentDebit(record);
+  return `оплачено з: ${record.paymentSource}${debit ? ` · списано ${formattedDebit(debit)}` : ''}`;
+}
+
+function capitalGroups() {
+  const balances = new Map(CATEGORIES.capital.map(account => [account, 0]));
+  for (const record of records) {
+    if (record.type === 'capital' && balances.has(record.category)) {
+      balances.set(record.category, balances.get(record.category) + Number(record.amount));
+    }
+    const debit = linkedPaymentDebit(record);
+    if (debit?.currency === 'UAH') {
+      balances.set(debit.account, balances.get(debit.account) - debit.amount);
+    }
+  }
+  return [...balances];
+}
 function currentCapital(){return capitalGroups().reduce((a,x)=>a+x[1],0)}
 function bars(items,type){const max=Math.max(...items.map(x=>x[1]),1);return `<div class="bars">${items.map(([n,v])=>`<div><div class="bar-head"><span>${type==='income'?'':`${ICONS[n]||'•'} `}${esc(n)}</span><b>${money(type,v)}</b></div><div class="track"><div class="fill" style="width:${Math.max(0,v/max*100)}%"></div></div></div>`).join('')}</div>`}
 function incomeGroups(){return groups('income',CATEGORIES.income)}
@@ -52,6 +89,12 @@ function renderTasks(c){$('.toolbar').style.display='none';$('#addBtn').style.di
 function savePlans(){localStorage.setItem('finspace-income-plans',JSON.stringify(plans));localStorage.setItem('finspace-income-ideas',JSON.stringify(ideas))}
 function expectedTotal(month=localStorage.getItem('finspace-plan-month')||'2026-12'){return plans.filter(p=>!p.received&&p.month===month).reduce((a,p)=>a+Number(p.amount),0)}
 function renderDecomposition(c){$('.toolbar').style.display='none';$('#addBtn').style.display='none';const defaultMonth='2026-12',selected=localStorage.getItem('finspace-plan-month')||defaultMonth,monthPlans=plans.filter(p=>p.month===selected),expected=monthPlans.filter(p=>!p.received).reduce((a,p)=>a+Number(p.amount),0),received=monthPlans.filter(p=>p.received).reduce((a,p)=>a+Number(p.amount),0);c.innerHTML=`<div class="decomp-summary"><div class="card expected-point"><div class="label">Очікується</div><div class="value">${fmt(expected)}</div></div><div class="card"><div class="label">Вже надійшло</div><div class="value accent">${fmt(received)}</div></div><div class="card"><div class="label">Прогноз разом</div><div class="value">${fmt(expected+received)}</div></div></div><div class="card decomp-form"><label>Місяць<input id="planMonth" type="month" value="${selected}"></label><label>Від кого<input id="planClient" placeholder="Клієнт або компанія"></label><label>Платіж / за що<input id="planPurpose" placeholder="Наприклад: реклама"></label><label>Сума, ₴<input id="planAmount" inputmode="decimal" placeholder="0"></label><button id="planAdd" class="primary">Додати платіж</button></div><div class="decomp-grid"><div class="card"><div class="section-title"><h2>Прогнозовані платежі</h2><span>${monthPlans.length}</span></div><div id="planRows">${monthPlans.length?monthPlans.map(p=>`<div class="plan-row ${p.received?'received':''}"><button class="plan-status" data-plan-toggle="${p.id}" title="Позначити отриманим">${p.received?'✓':''}</button><div class="plan-copy"><b>${esc(p.client||'Без імені')}</b><small>${esc(p.purpose||'Очікуваний платіж')}</small></div><div class="plan-amount"><b>${fmt(p.amount)}</b><small>${p.received?'отримано':'очікується'}</small></div><button class="plan-delete" data-plan-delete="${p.id}" title="Видалити">×</button></div>`).join(''):'<div class="task-empty">На цей місяць платежів ще немає</div>'}</div></div><div class="card"><div class="section-title"><h2>Ідеї, де ще взяти дохід</h2><span>${ideas.length}</span></div><div class="idea-add"><input id="ideaTitle" placeholder="Нова ідея"><button id="ideaAdd" class="primary">＋</button></div>${ideas.length?ideas.map(i=>`<div class="idea-row"><span class="idea-dot">◆</span><span>${esc(i.title)}</span><button class="idea-delete" data-idea-delete="${i.id}">×</button></div>`).join(''):'<div class="task-empty">Додайте першу ідею</div>'}</div></div>`;$('#planMonth').onchange=e=>{localStorage.setItem('finspace-plan-month',e.target.value);render('decomposition')};const addPlan=()=>{const raw=$('#planAmount').value.trim().replace(/\s/g,'').replace(',','.'),amount=Number(raw);if(!Number.isFinite(amount)||amount<0)return $('#planAmount').focus();plans.unshift({id:crypto.randomUUID(),month:$('#planMonth').value,client:$('#planClient').value.trim(),purpose:$('#planPurpose').value.trim(),amount,received:false});savePlans();render('decomposition')};$('#planAdd').onclick=addPlan;$$('[data-plan-toggle]').forEach(b=>b.onclick=()=>{plans=plans.map(p=>p.id===b.dataset.planToggle?{...p,received:!p.received}:p);savePlans();render('decomposition')});$$('[data-plan-delete]').forEach(b=>b.onclick=()=>{plans=plans.filter(p=>p.id!==b.dataset.planDelete);savePlans();render('decomposition')});const addIdea=()=>{const title=$('#ideaTitle').value.trim();if(!title)return;ideas.unshift({id:crypto.randomUUID(),title});savePlans();render('decomposition')};$('#ideaAdd').onclick=addIdea;$('#ideaTitle').onkeydown=e=>{if(e.key==='Enter')addIdea()};$$('[data-idea-delete]').forEach(b=>b.onclick=()=>{ideas=ideas.filter(i=>i.id!==b.dataset.ideaDelete);savePlans();render('decomposition')})}
+function overviewMoneyCard(label, amount, expense = false) {
+  return `<div class="card${expense ? ' expense-summary' : ''}"><div class="label">${label}</div>
+    <div class="value${expense ? '' : ' accent'}">${fmt(amount)}</div>
+    <div class="usd-value">≈ ${fmtUSD(amount)} · курс ${USD_RATE} ₴/$</div></div>`;
+}
+
 function render(key='overview'){
 current=key;document.body.dataset.section=key;$$('nav button').forEach(b=>b.classList.toggle('active',b.dataset.key===key));$('#eyebrow').textContent=TYPES[key][0].toUpperCase();$('#title').textContent=TYPES[key][1];const data=visible(),c=$('#content');
 if(key==='tasks'){renderTasks(c);return}if(key==='decomposition'){renderDecomposition(c);return}
@@ -66,7 +109,7 @@ if (['work', 'crypto', 'etsy'].includes(key)) {
 if(key==='overview'){
 const positions = investmentPositions(), wallets = walletCash();
 const cryptoTotals = cryptoSummary(wallets, positions);
-c.innerHTML=`<div class="stats"><div class="card"><div class="label">Капітал у гривнях</div><div class="value accent">${fmt(currentCapital()+sum('savings'))}</div></div><div class="card"><div class="label">Надходження</div><div class="value accent">${fmt(sum('income'))}</div></div><div class="card expense-summary"><div class="label">Витрати</div><div class="value">${fmt(sum('expense'))}</div></div><div class="card"><div class="label">Крипто</div><div class="value" id="overviewCryptoTotal">${fmtUSDT(cryptoTotals.total)}</div><small id="overviewCryptoBasis" class="crypto-note">${cryptoTotals.basis}</small></div></div><div class="split"><div class="card income-panel"><div class="section-title"><h2>Напрями надходжень</h2></div>${bars(groups('income',CATEGORIES.income),'income')}</div><div class="card"><div class="section-title"><h2>Капітал у банках</h2></div>${bars(capitalGroups(),'capital')}</div></div><div class="card expense-panel"><div class="section-title"><h2>Витрати за категоріями</h2></div>${bars(groups('expense',CATEGORIES.expense),'expense')}</div><div class="card breakdown income-panel"><div class="section-title"><h2>Надходження за останні 6 місяців</h2></div>${monthlyAnalytics('income')}</div><div class="card breakdown expense-panel"><div class="section-title"><h2>Витрати за останні 6 місяців</h2></div>${monthlyAnalytics('expense')}</div><div class="card page-table"><div class="section-title"><h2>Останні записи</h2></div>${data.length?[...data].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6).map(row).join(''):'<div class="empty">За цей період записів немає</div>'}</div>`
+c.innerHTML=`<div class="stats">${overviewMoneyCard('Капітал у гривнях', currentCapital() + sum('savings'))}${overviewMoneyCard('Надходження', sum('income'))}${overviewMoneyCard('Витрати', sum('expense'), true)}<div class="card"><div class="label">Крипто</div><div class="value" id="overviewCryptoTotal">${fmtUSDT(cryptoTotals.total)}</div><small id="overviewCryptoBasis" class="crypto-note">${cryptoTotals.basis}</small></div></div><div class="split"><div class="card income-panel"><div class="section-title"><h2>Напрями надходжень</h2></div>${bars(groups('income',CATEGORIES.income),'income')}</div><div class="card"><div class="section-title"><h2>Капітал у банках</h2></div>${bars(capitalGroups(),'capital')}</div></div><div class="card expense-panel"><div class="section-title"><h2>Витрати за категоріями</h2></div>${bars(groups('expense',CATEGORIES.expense),'expense')}</div><div class="card breakdown income-panel"><div class="section-title"><h2>Надходження за останні 6 місяців</h2></div>${monthlyAnalytics('income')}</div><div class="card breakdown expense-panel"><div class="section-title"><h2>Витрати за останні 6 місяців</h2></div>${monthlyAnalytics('expense')}</div><div class="card page-table"><div class="section-title"><h2>Останні записи</h2></div>${data.length?[...data].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6).map(row).join(''):'<div class="empty">За цей період записів немає</div>'}</div>`
 const total = $('#overviewCryptoTotal'), basis = $('#overviewCryptoBasis');
 loadMarketPrices(total, positions, () => {
   const updated = cryptoSummary(wallets, positions);
@@ -95,6 +138,25 @@ function syncEtsyDebitField() {
   $('#etsyDebitHint').textContent = previous
     ? 'Вкажіть суму USDT, якщо це списання ще потрібно відобразити.'
     : 'За замовчуванням сума в USDT дорівнює сумі в USD. За потреби введіть фактичну суму списання.';
+}
+
+function syncPaymentPreview() {
+  const hint = $('#paymentDebitHint');
+  const section = type.value;
+  const amount = parseEntryNumber('#amount');
+  const originalCurrency = editingRecord && isLegacyEtsyAmount(editingRecord) &&
+    amount === etsyAmountInCents(editingRecord) / 100;
+  const debit = linkedPaymentDebit({
+    type: section,
+    category: entryCategory.value,
+    paymentSource: $('#paymentSourceLabel').hidden ? '' : paymentSource.value,
+    amount: section === 'etsy' && originalCurrency ? editingRecord.amount : amount,
+    currency: originalCurrency ? 'UAH' : 'USD',
+  });
+  hint.hidden = !debit;
+  if (!debit) return;
+  const converted = debit.currency === 'USDT' || (section === 'etsy' && !originalCurrency);
+  hint.textContent = `Списання в обліку — ${formattedDebit(debit)}${converted ? ` за курсом ${USD_RATE} ₴/$` : ''}.`;
 }
 
 function updateInvestmentPrice() {
@@ -137,6 +199,7 @@ function syncEntryCategoryFields() {
   const etsySale = isEtsy && entryCategory.value === ETSY_SALE;
   $('#paymentSourceLabel').hidden = !(type.value === 'expense' || type.value === 'work' || (isEtsy && !etsySale));
   syncEtsyDebitField();
+  syncPaymentPreview();
   if (!isEtsy) return;
   $('#nameCaption').textContent = etsySale ? 'Товар або № замовлення' : 'Назва витрати';
   $('#name').placeholder = etsySale ? 'Наприклад: замовлення №102' : 'Наприклад: комісія Etsy';
@@ -178,6 +241,7 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '', defau
   const debit = etsyWalletDebit(record);
   $('#etsyDebit').value = debit && record.metaMaskDebitOverride ? debit : '';
   syncEtsyDebitField();
+  syncPaymentPreview();
   $('#investmentCoin').value = record?.investmentCoin || defaultCoin;
   $('#investmentQuantity').value = record?.investmentQuantity || '';
   updateInvestmentPrice();
@@ -191,8 +255,12 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '', defau
 type.onchange = () => syncForm();
 entryOperation.onchange = syncCryptoFields;
 entryCategory.onchange = syncEntryCategoryFields;
-paymentSource.onchange = syncEtsyDebitField;
+paymentSource.onchange = () => {
+  syncEtsyDebitField();
+  syncPaymentPreview();
+};
 $('#amount').addEventListener('input', updateInvestmentPrice);
+$('#amount').addEventListener('input', syncPaymentPreview);
 $('#investmentQuantity').addEventListener('input', updateInvestmentPrice);
 $('#addBtn').onclick = () => openEntry();
 
@@ -241,7 +309,16 @@ form.onsubmit = event => {
     purpose: $('#purpose').value.trim(),
     note: $('#note').value.trim(),
   };
-  if (item.type === 'etsy') item.currency = 'USD';
+  if (item.type === 'etsy') {
+    item.currency = 'USD';
+    const preserveLegacy = original && isLegacyEtsyAmount(original) &&
+      amount === etsyAmountInCents(original) / 100 &&
+      (!isEtsyWalletExpense(item) || (needsExplicitEtsyDebit(original) && $('#etsyDebit').value.trim() === ''));
+    if (preserveLegacy) {
+      item.currency = 'UAH';
+      item.amount = original.amount;
+    }
+  }
   if (isEtsyWalletExpense(item)) {
     const explicitDebit = $('#etsyDebit').value.trim() !== '';
     const debit = explicitDebit ? parseEntryNumber('#etsyDebit') : needsExplicitEtsyDebit(original) ? 0 : amount;

@@ -22,9 +22,9 @@ const isHistoricalCryptoBuy = record => isCryptoBuy(record) && cryptoWallet(reco
 function walletCash(entries = records) {
   const balances = new Map(CATEGORIES.crypto.map(wallet => [wallet, 0]));
   for (const record of entries) {
-    const etsyDebit = etsyWalletDebit(record);
-    if (etsyDebit) {
-      balances.set(ETSY_WALLET, (balances.get(ETSY_WALLET) ?? 0) - etsyDebit);
+    const debit = linkedPaymentDebit(record);
+    if (debit?.currency === 'USDT') {
+      balances.set(debit.account, (balances.get(debit.account) ?? 0) - debit.amount);
       continue;
     }
     if (record.type !== 'crypto' || isHistoricalCryptoBuy(record)) continue;
@@ -155,12 +155,14 @@ async function loadMarketPrices(scope, positions, onQuote) {
 }
 
 function cryptoMovementRow(record) {
-  const etsyDebit = etsyWalletDebit(record);
-  const withdrawal = etsyDebit > 0 || record.cryptoOperation === 'withdrawal';
-  const operation = etsyDebit ? 'Витрата Etsy' : withdrawal ? CRYPTO_OPERATIONS.withdrawal : CRYPTO_OPERATIONS.deposit;
-  const wallet = etsyDebit ? ETSY_WALLET : cryptoWallet(record);
-  const amount = etsyDebit ? tokenPrice(etsyDebit) : fmtUSDT(record.amount);
-  const details = [cryptoDate(record), wallet, etsyDebit && (record.name || record.category), record.note].filter(Boolean).join(' · ');
+  const debit = linkedPaymentDebit(record);
+  const linked = debit?.currency === 'USDT';
+  const withdrawal = linked || record.cryptoOperation === 'withdrawal';
+  const operationLabels = { etsy: 'Витрата Etsy', expense: 'Витрата', work: 'Інвестиція у блог' };
+  const operation = linked ? operationLabels[record.type] : withdrawal ? CRYPTO_OPERATIONS.withdrawal : CRYPTO_OPERATIONS.deposit;
+  const wallet = linked ? debit.account : cryptoWallet(record);
+  const amount = linked ? formattedDebit(debit) : fmtUSDT(record.amount);
+  const details = [cryptoDate(record), wallet, linked && (record.name || record.category), record.note].filter(Boolean).join(' · ');
   return `<div class="row"><div class="row-icon">${withdrawal ? '−' : '+'}</div>
     <div><b>${operation}</b><small>${esc(details)}</small></div>
     <div class="amount">${withdrawal ? '−' : '+'}${amount}</div>${recordActions(record)}</div>`;
@@ -173,7 +175,7 @@ function investmentRow(record, showPurchasePnl = false) {
   const details = purchase
     ? [cryptoWallet(record), record.investmentPrice && `курс ${tokenPrice(record.investmentPrice)}`,
        record.investmentQuantity && `${tokenNumber.format(record.investmentQuantity)} ${coin}`, record.note]
-    : [record.paymentSource && `оплачено з: ${record.paymentSource}`, record.note];
+    : [paymentDetails(record), record.note];
   const isSol = purchase && coin === 'SOL';
   const icon = isSol ? '<img class="solana-mark" src="solana-mark.svg" alt="" width="20" height="16">'
     : purchase ? '₿' : '◉';
@@ -209,7 +211,8 @@ function renderCrypto(content, visibleRecords) {
     .sort((a, b) => b.date.localeCompare(a.date));
   const wallets = walletCash();
   const totals = cryptoSummary(wallets, positions);
-  const movements = visibleRecords.filter(record => (record.type === 'crypto' && !isCryptoBuy(record)) || etsyWalletDebit(record))
+  const movements = visibleRecords.filter(record => (record.type === 'crypto' && !isCryptoBuy(record)) ||
+    linkedPaymentDebit(record)?.currency === 'USDT')
     .sort((a, b) => b.date.localeCompare(a.date));
   const walletPositions = new Map();
   for (const purchase of purchases) {
