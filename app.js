@@ -80,6 +80,22 @@ c.innerHTML=`<div class="stats"><div class="card"><div class="label">Загал�
 const dlg=$('#entryDialog'),form=$('#entryForm'),type=$('#type');
 const entryCategory = $('#category'), entryOperation = $('#cryptoOperation'), paymentSource = $('#paymentSource');
 const parseEntryNumber = field => Number($(field).value.trim().replace(/\s/g, '').replace(',', '.'));
+let editingRecord = null;
+
+function needsExplicitEtsyDebit(record) {
+  return isEtsyWalletExpense(record) && !etsyWalletDebit(record);
+}
+
+function syncEtsyDebitField() {
+  const linked = type.value === 'etsy' && entryCategory.value !== ETSY_SALE && paymentSource.value === ETSY_WALLET;
+  $('#etsyDebitLabel').hidden = !linked;
+  if (!linked) return;
+  const previous = needsExplicitEtsyDebit(editingRecord);
+  $('#etsyDebit').placeholder = previous ? 'Не списувати' : 'Дорівнює сумі в USD';
+  $('#etsyDebitHint').textContent = previous
+    ? 'Вкажіть суму USDT, якщо це списання ще потрібно відобразити.'
+    : 'За замовчуванням сума в USDT дорівнює сумі в USD. За потреби введіть фактичну суму списання.';
+}
 
 function updateInvestmentPrice() {
   const amount = parseEntryNumber('#amount');
@@ -120,6 +136,7 @@ function syncEntryCategoryFields() {
   const isEtsy = type.value === 'etsy';
   const etsySale = isEtsy && entryCategory.value === ETSY_SALE;
   $('#paymentSourceLabel').hidden = !(type.value === 'expense' || type.value === 'work' || (isEtsy && !etsySale));
+  syncEtsyDebitField();
   if (!isEtsy) return;
   $('#nameCaption').textContent = etsySale ? 'Товар або № замовлення' : 'Назва витрати';
   $('#name').placeholder = etsySale ? 'Наприклад: замовлення №102' : 'Наприклад: комісія Etsy';
@@ -129,7 +146,8 @@ function syncCryptoFields() {
   const isCrypto = type.value === 'crypto';
   const buy = isCrypto && entryOperation.value === 'investment';
   $('#amountCaption').textContent = buy ? 'Сума покупки, USDT'
-    : isCrypto ? 'Сума, USDT' : type.value === 'work' ? 'Сума інвестиції, ₴' : 'Сума, ₴';
+    : isCrypto ? 'Сума, USDT' : type.value === 'etsy' ? 'Сума, $ (USD)'
+    : type.value === 'work' ? 'Сума інвестиції, ₴' : 'Сума, ₴';
   $('#cryptoInvestmentFields').hidden = !buy;
   const historicalOption = [...entryCategory.options].find(option => option.value === HISTORICAL_CRYPTO_PURCHASE);
   if (historicalOption) {
@@ -142,6 +160,7 @@ function syncCryptoFields() {
 }
 
 function openEntry(record = null, operation = 'deposit', defaultCoin = '', defaultCategory = '') {
+  editingRecord = record;
   const legacyBuy = record && isLegacyCryptoBuy(record);
   const section = legacyBuy || (!record && operation === 'investment') ? 'crypto'
     : record?.type || (['overview', 'decomposition', 'tasks'].includes(current) ? 'expense' : current);
@@ -153,9 +172,12 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '', defau
   type.value = section;
   entryOperation.value = legacyBuy ? 'investment' : (record?.cryptoOperation || operation);
   syncForm(category);
-  $('#amount').value = record?.amount ?? '';
+  $('#amount').value = record && isLegacyEtsyAmount(record) ? etsyAmountInCents(record) / 100 : (record?.amount ?? '');
   $('#date').value = record?.date || new Date().toLocaleDateString('sv-SE');
   paymentSource.value = record?.paymentSource || '';
+  const debit = etsyWalletDebit(record);
+  $('#etsyDebit').value = debit && record.metaMaskDebitOverride ? debit : '';
+  syncEtsyDebitField();
   $('#investmentCoin').value = record?.investmentCoin || defaultCoin;
   $('#investmentQuantity').value = record?.investmentQuantity || '';
   updateInvestmentPrice();
@@ -169,6 +191,7 @@ function openEntry(record = null, operation = 'deposit', defaultCoin = '', defau
 type.onchange = () => syncForm();
 entryOperation.onchange = syncCryptoFields;
 entryCategory.onchange = syncEntryCategoryFields;
+paymentSource.onchange = syncEtsyDebitField;
 $('#amount').addEventListener('input', updateInvestmentPrice);
 $('#investmentQuantity').addEventListener('input', updateInvestmentPrice);
 $('#addBtn').onclick = () => openEntry();
@@ -218,6 +241,16 @@ form.onsubmit = event => {
     purpose: $('#purpose').value.trim(),
     note: $('#note').value.trim(),
   };
+  if (item.type === 'etsy') item.currency = 'USD';
+  if (isEtsyWalletExpense(item)) {
+    const explicitDebit = $('#etsyDebit').value.trim() !== '';
+    const debit = explicitDebit ? parseEntryNumber('#etsyDebit') : needsExplicitEtsyDebit(original) ? 0 : amount;
+    if (explicitDebit && (!Number.isFinite(debit) || debit <= 0)) {
+      return invalid($('#etsyDebit'), 'Введіть суму списання в USDT більше нуля');
+    }
+    if (debit) item.metaMaskDebit = debit;
+    if (explicitDebit) item.metaMaskDebitOverride = true;
+  }
   if (isCrypto && !legacyBuy) item.cryptoOperation = operation;
   if (buy) {
     item.investmentCoin = coin;
@@ -227,7 +260,7 @@ form.onsubmit = event => {
   }
   const updated = id ? records.map(record => record.id === id ? item : record) : [...records, item];
   const balanceError = cryptoBalanceError(updated);
-  if (balanceError) return invalid($('#amount'), balanceError);
+  if (balanceError) return invalid(etsyWalletDebit(item) ? $('#etsyDebit') : $('#amount'), balanceError);
   records = updated;
   save();
   const nextView = buy ? 'crypto' : item.type;

@@ -1,14 +1,27 @@
 const ETSY_SALE = 'Продаж';
 const ETSY_EXPENSES = ['Витрати на навчання', 'Витрати на магазин', 'Витрати на товар'];
+const ETSY_WALLET = 'MetaMask';
 const isEtsySale = record => record.category === ETSY_SALE;
 const amountInCents = amount => Math.round(Number(amount) * 100);
-const etsyMoney = cents => fmt(cents / 100);
+const etsyDollarFormat = new Intl.NumberFormat('uk-UA', { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol' });
+const etsyMoney = cents => etsyDollarFormat.format(cents / 100);
+const isLegacyEtsyAmount = record => record.type === 'etsy' && record.currency !== 'USD';
+const etsyAmountInCents = record => amountInCents(isLegacyEtsyAmount(record) ? record.amount / USD_RATE : record.amount);
 const etsyNetTone = cents => cents > 0 ? ' accent' : cents < 0 ? ' etsy-loss' : '';
+
+function isEtsyWalletExpense(record) {
+  return record?.type === 'etsy' && !isEtsySale(record) && record.paymentSource === ETSY_WALLET;
+}
+
+function etsyWalletDebit(record) {
+  const debit = Number(record?.metaMaskDebit);
+  return isEtsyWalletExpense(record) && record.currency === 'USD' && Number.isFinite(debit) && debit > 0 ? debit : 0;
+}
 
 function etsyStats(entries) {
   const stats = { sales: 0, revenue: 0, expenses: 0, net: 0 };
   for (const entry of entries) {
-    const cents = amountInCents(entry.amount);
+    const cents = etsyAmountInCents(entry);
     if (!Number.isSafeInteger(cents) || cents <= 0) continue;
     if (isEtsySale(entry)) {
       stats.sales++;
@@ -23,12 +36,14 @@ function etsyStats(entries) {
 
 function etsyRow(record) {
   const sale = isEtsySale(record);
+  const debit = etsyWalletDebit(record);
   const details = [cryptoDate(record), record.name && record.category,
-    record.paymentSource && `оплачено з: ${record.paymentSource}`, record.note];
+    record.paymentSource && `оплачено з: ${record.paymentSource}`,
+    debit && `списано ${tokenPrice(debit)}`, record.note];
   return `<div class="row etsy-row">
     <div class="row-icon" aria-hidden="true">${sale ? '+' : '−'}</div>
     <div><b>${esc(record.name || record.category)}</b><small>${esc(details.filter(Boolean).join(' · '))}</small></div>
-    <div class="amount${sale ? ' accent' : ' etsy-loss'}">${sale ? '+' : '−'}${fmt(record.amount)}</div>
+    <div class="amount${sale ? ' accent' : ' etsy-loss'}">${sale ? '+' : '−'}${etsyMoney(etsyAmountInCents(record))}</div>
     ${recordActions(record)}
   </div>`;
 }
@@ -37,7 +52,7 @@ function etsyExpenseBreakdown(expenses) {
   const categories = new Map(ETSY_EXPENSES.map(category => [category, 0]));
   const sources = new Map();
   for (const expense of expenses) {
-    const cents = amountInCents(expense.amount);
+    const cents = etsyAmountInCents(expense);
     if (!Number.isSafeInteger(cents) || cents <= 0) continue;
     const category = expense.category || 'Без категорії';
     const source = expense.paymentSource || 'Не вказано';
@@ -79,12 +94,15 @@ function renderEtsy(content, visibleRecords) {
   const sales = entries.filter(isEtsySale);
   const expenses = entries.filter(record => !isEtsySale(record));
   const stats = etsyStats(entries);
+  const historicalNotice = records.some(isLegacyEtsyAmount)
+    ? `<small class="crypto-note">Старі суми в гривнях показано за обліковим курсом ${USD_RATE} ₴ за $1.</small>` : '';
   content.innerHTML = `<div class="stats etsy-stats">
     <div class="card"><div class="label">Сума продажів</div><div class="value accent" data-etsy-total="revenue">${etsyMoney(stats.revenue)}</div></div>
     <div class="card"><div class="label">Витрати</div><div class="value etsy-loss" data-etsy-total="expenses">${etsyMoney(stats.expenses)}</div></div>
     <div class="card"><div class="label">Чистий дохід</div><div class="value${etsyNetTone(stats.net)}" data-etsy-total="net">${etsyMoney(stats.net)}</div></div>
     <div class="card"><div class="label">Кількість продажів</div><div class="value" data-etsy-total="sales">${stats.sales}</div></div>
   </div>
+  ${historicalNotice}
   <div class="etsy-grid" aria-label="Розбивка витрат">${etsyExpenseBreakdown(expenses)}</div>
   ${etsyMonthTable(records.filter(record => record.type === 'etsy'))}
   <div class="etsy-grid">

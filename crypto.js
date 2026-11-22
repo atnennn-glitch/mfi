@@ -22,6 +22,11 @@ const isHistoricalCryptoBuy = record => isCryptoBuy(record) && cryptoWallet(reco
 function walletCash(entries = records) {
   const balances = new Map(CATEGORIES.crypto.map(wallet => [wallet, 0]));
   for (const record of entries) {
+    const etsyDebit = etsyWalletDebit(record);
+    if (etsyDebit) {
+      balances.set(ETSY_WALLET, (balances.get(ETSY_WALLET) ?? 0) - etsyDebit);
+      continue;
+    }
     if (record.type !== 'crypto' || isHistoricalCryptoBuy(record)) continue;
     const wallet = cryptoWallet(record) || 'Портфель не вказано';
     const amount = Number(record.amount);
@@ -150,12 +155,15 @@ async function loadMarketPrices(scope, positions, onQuote) {
 }
 
 function cryptoMovementRow(record) {
-  const withdrawal = record.cryptoOperation === 'withdrawal';
-  const operation = withdrawal ? CRYPTO_OPERATIONS.withdrawal : CRYPTO_OPERATIONS.deposit;
-  const details = [cryptoDate(record), cryptoWallet(record), record.note].filter(Boolean).join(' · ');
+  const etsyDebit = etsyWalletDebit(record);
+  const withdrawal = etsyDebit > 0 || record.cryptoOperation === 'withdrawal';
+  const operation = etsyDebit ? 'Витрата Etsy' : withdrawal ? CRYPTO_OPERATIONS.withdrawal : CRYPTO_OPERATIONS.deposit;
+  const wallet = etsyDebit ? ETSY_WALLET : cryptoWallet(record);
+  const amount = etsyDebit ? tokenPrice(etsyDebit) : fmtUSDT(record.amount);
+  const details = [cryptoDate(record), wallet, etsyDebit && (record.name || record.category), record.note].filter(Boolean).join(' · ');
   return `<div class="row"><div class="row-icon">${withdrawal ? '−' : '+'}</div>
     <div><b>${operation}</b><small>${esc(details)}</small></div>
-    <div class="amount">${withdrawal ? '−' : '+'}${fmtUSDT(record.amount)}</div>${recordActions(record)}</div>`;
+    <div class="amount">${withdrawal ? '−' : '+'}${amount}</div>${recordActions(record)}</div>`;
 }
 
 function investmentRow(record, showPurchasePnl = false) {
@@ -201,7 +209,7 @@ function renderCrypto(content, visibleRecords) {
     .sort((a, b) => b.date.localeCompare(a.date));
   const wallets = walletCash();
   const totals = cryptoSummary(wallets, positions);
-  const movements = visibleRecords.filter(record => record.type === 'crypto' && !isCryptoBuy(record))
+  const movements = visibleRecords.filter(record => (record.type === 'crypto' && !isCryptoBuy(record)) || etsyWalletDebit(record))
     .sort((a, b) => b.date.localeCompare(a.date));
   const walletPositions = new Map();
   for (const purchase of purchases) {
